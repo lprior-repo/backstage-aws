@@ -1,0 +1,12 @@
+output "namespace" { value = var.namespace }
+output "hostname" { value = var.hostname }
+output "url" { value = "https://${var.hostname}" }
+output "database_name" { value = var.database_name }
+output "ecs_service_name" { value = aws_ecs_service.env.name }
+output "ecs_service_arn" { value = aws_ecs_service.env.id }
+output "task_definition_arn" { value = aws_ecs_task_definition.env.arn }
+output "image_digest" { value = var.image_digest }
+output "target_group_arn" { value = aws_lb_target_group.env.arn }
+output "ecs_cluster_name" { value = local.base.ecs_cluster_name }
+output "desired_count" { value = var.desired_count }
+output "listener_rule_arn" { value = aws_lb_listener_rule.env.arn }

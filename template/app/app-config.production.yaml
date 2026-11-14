@@ -1,0 +1,33 @@
+app:
+  baseUrl: ${APP_BASE_URL}
+
+backend:
+  baseUrl: ${BACKEND_BASE_URL}
+  cors:
+    origin: ${APP_BASE_URL}
+  database:
+    client: pg
+    pluginDivisionMode: schema
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      database: ${POSTGRES_DB}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      ssl:
+        rejectUnauthorized: true
+        ca:
+          $file: ./certs/aws-rds-global-bundle.pem
+    knexConfig:
+      pool:
+        min: 0
+        max: 5
+
+catalog:
+  locations:
+    - type: file
+      target: ./catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    - type: file
+      target: ./catalog/entities.yaml

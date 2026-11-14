@@ -1,0 +1,40 @@
+name: Setup backstage-aws
+inputs:
+  settings:
+    description: >-
+      Pass `toJSON(vars)`. Every BACKSTAGE_AWS_* variable that `backstage-aws
+      bootstrap` published to the job's GitHub environment becomes a setting
+      for the following steps.
+    default: "{}"
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      with:
+        terraform_version: 1.17.2
+        terraform_wrapper: false
+    - name: Export settings
+      shell: bash
+      env:
+        SETTINGS: ${{ inputs.settings }}
+      run: |
+        set -euo pipefail
+        jq -r 'to_entries[]
+          | select((.key | startswith("BACKSTAGE_AWS_")) and (.value | test("[\r\n]") | not))
+          | "\(.key)=\(.value)"' <<<"$SETTINGS" >> "$GITHUB_ENV"
+    - name: Download and verify backstage-aws
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        directory="$(mktemp -d)"
+        gh release download "v__BACKSTAGE_AWS_CLI_VERSION__" \
+          --repo "__BACKSTAGE_AWS_CLI_REPOSITORY__" \
+          --pattern backstage-aws-x86_64-unknown-linux-gnu.tar.gz \
+          --dir "$directory"
+        gh attestation verify "$directory/backstage-aws-x86_64-unknown-linux-gnu.tar.gz" \
+          --repo "__BACKSTAGE_AWS_CLI_REPOSITORY__"
+        tar -xzf "$directory/backstage-aws-x86_64-unknown-linux-gnu.tar.gz" -C "$directory"
+        chmod +x "$directory/backstage-aws"
+        echo "$directory" >> "$GITHUB_PATH"

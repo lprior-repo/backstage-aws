@@ -1,0 +1,27 @@
+# CLI state and private environment configuration
+.backstage-aws/
+**/.backstage-aws/
+.terraform/
+**/.terraform/
+*.tfstate*
+*.tfplan
+*.tfvars.json
+backend.local.hcl
+backend.local.tf
+.env
+.env.*
+**/.env
+**/.env.*
+.secrets/
+
+# Application dependencies and generated output
+**/node_modules/
+**/.yarn/cache/
+**/.yarn/install-state.gz
+**/dist/
+**/dist-types/
+**/coverage/
+**/target/
+**/playwright-report/
+**/test-results/
+.DS_Store

@@ -1,66 +1,17 @@
-# macOS
+/target/
+.cache/
+.evidence/
 .DS_Store
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Coverage directory generated when running tests with coverage
-coverage
-
-# Dependencies
-node_modules/
-
-# Yarn files
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-
-# Node version directives
-.nvmrc
-
-# dotenv environment variables file
-.env
-.env.test
-
-# Build output
-dist
-dist-types
-
-# Temporary change files created by Vim
 *.swp
 
-# MkDocs build output
-site
-
-# Local configuration files
-*.local.yaml
-
-# Sensitive credentials
-*-credentials.yaml
-
-# vscode database functionality support files
-*.session.sql
-
-# E2E test reports
-e2e-test-report/
-
-# Cache
-.cache/
-/target/
-.evidence/
+# Never commit local Terraform or operator state produced while testing the template
 .terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
-*.tfvars
-*.tfbackend
+*.tfvars.json
+backend.local.hcl
+backend.local.tf
+.backstage-aws/
+.env
 .env.*
-!.env.example

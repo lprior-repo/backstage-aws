@@ -1,0 +1,7 @@
+auth:
+  environment: production
+  session:
+    secret: ${AUTH_SESSION_SECRET}
+  providers:
+    guest:
+      dangerouslyAllowOutsideDevelopment: true

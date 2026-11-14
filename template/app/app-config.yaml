@@ -1,0 +1,42 @@
+app:
+  title: __BACKSTAGE_AWS_NAME__
+  baseUrl: http://localhost:3000
+  packages: all
+  extensions:
+    - page:catalog:
+        config:
+          path: /
+
+organization:
+  name: Platform Engineering
+
+backend:
+  baseUrl: http://localhost:7007
+  listen:
+    host: 0.0.0.0
+    port: 7007
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+
+permission:
+  enabled: true
+
+scaffolder:
+  taskRecovery:
+    enabled: true
+    staleTimeout: { seconds: 60 }
+
+
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource]
+  locations:
+    - type: file
+      target: ../../catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    - type: file
+      target: ../../catalog/entities.yaml
+    - type: file

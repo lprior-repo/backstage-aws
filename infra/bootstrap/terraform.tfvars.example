@@ -1,3 +1,0 @@
-region            = "us-east-1"
-state_bucket_name = "REPLACE-backstage-state-ACCOUNT-REGION"
-name              = "backstage"

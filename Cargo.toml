@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/backstage_aws"]
-exclude = ["templates/full-automation/tools/portalctl"]
 resolver = "3"
 
 [workspace.package]

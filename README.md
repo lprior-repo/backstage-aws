@@ -1,50 +1,58 @@
-# Backstage AWS generator
+# backstage-aws
 
-The Rust binary now uses `backstage-aws-full-automation.zip` as its project baseline. It embeds the application, operator automation, Terraform, GitHub workflows, tests, documentation, licenses and provenance. Generation works offline from a copied executable; it does not run Terraform, install dependencies, call AWS or publish anything.
+`backstage-aws` is a Rust CLI that renders and operates a Backstage-on-AWS project. The generated project contains the Backstage app, Terraform, GitHub Actions workflows, and concise operator guidance. Rust handles orchestration; Node is confined to `template/app`.
 
-## Generate
+## Build and render
+
+The checked-in `rust-toolchain.toml` selects the Rust toolchain. Build and render a new project using settings from the environment:
 
 ```sh
 cargo build --locked --release
-./target/release/backstage-aws generator.example.toml ../my-portal
+BACKSTAGE_AWS_NAME=example-portal \
+BACKSTAGE_AWS_AWS_ACCOUNT_ID=123456789012 \
+BACKSTAGE_AWS_AWS_REGION=us-east-1 \
+BACKSTAGE_AWS_DOMAIN_NAME=preview.example.com \
+BACKSTAGE_AWS_ROUTE53_ZONE_ID=Z123456789ABC \
+BACKSTAGE_AWS_GITHUB_REPOSITORY=example-owner/example-portal \
+BACKSTAGE_AWS_OWNER_GITHUB_ID=123456789 \
+  ./target/release/backstage-aws init --output ../backstage-project
 ```
 
-Edit the example TOML with your real non-secret identifiers before deployment. The output directory must not exist; its parent must exist. Existing directories, files and symlinks are refused. A write failure can leave a newly created partial directory for inspection. Shell entry points receive executable permissions on Unix.
+Replace fixture values with your own. The CLI's `--help` and command-specific help are the source of truth for options.
 
-The output contains 144 files, including a ready-filled `deployment.json`. Its schema matches the archive's operator automation. `owner_github_id` is the immutable numeric GitHub ID, not a login. The example account, ID, domain, email addresses and networks are fixtures. Unknown fields and credential values are rejected; configuration errors do not echo input contents.
+## Generated system
 
-The config schema changed with this baseline: `owner_github_id`, `budget_email` and `alert_email` replace the earlier login-based setup. Image digests, identity-secret ARNs and Terraform state are provisioned and managed by the supplied automation; the earlier `image_digest`, `app_secret_arn`, `state_bucket` and `github_user` generator fields are no longer inputs. Use the updated example. Optional plugin-secret references can be configured in generated `deployment.json` using the archive's documented schema.
+Three Terraform stacks are used per account. `bootstrap` is applied once per account to configure encrypted remote state and GitHub OIDC/environment; `base` creates shared network, ALB, ECS, ECR, PostgreSQL, secrets, seed storage, and db-admin tasks; `env` creates one namespace's target group, listener rule, log group, task definition, and service. Production is the `production` namespace. Pull-request previews are `pr-<number>` namespaces in an AWS account separate from production.
 
-After generation, use Node 24.22.1 and Terraform 1.17.2:
+A PostgreSQL custom-format dump supplied by the operator is restored to the shared `seed` database. Environments clone their own database from that seed and use the same environment stack as production. Previews use guest sign-in behind the configured ingress allowlist; production uses GitHub OAuth.
+
+The preview workflow builds/pushes an image and clones seed data concurrently, applies the `env` stack, then waits for the ECS rollout and for the load balancer to report a healthy target, and reports URL/timings. The target is a reachable URL within five minutes of a PR push with a warm cache. No timing has been measured; this is not an observed service level.
+
+The CLI runs Terraform 1.17.2 from `PATH` (or `--terraform`) and refuses any other version; it does not download Terraform. Image builds use `docker buildx`.
+
+## First install
+
+Configure required `BACKSTAGE_AWS_*` settings and supply a custom-format database dump as `DUMP`. Run this sequence, stopping at any failure:
 
 ```sh
-cd ../my-portal
-./platform configure
-./scripts/check-automation.sh
+backstage-aws init --output ./backstage-project
+cd ./backstage-project
+backstage-aws check
+backstage-aws doctor
+backstage-aws bootstrap --approve
+backstage-aws base --approve
+backstage-aws seed --file DUMP --approve
+backstage-aws publish --approve
+backstage-aws env up --approve
 ```
 
-`configure` writes local Terraform inputs and updates the catalog owner; it makes no AWS calls. Follow the generated README for actual deployment. Commands such as `up`, `release`, `rollback`, secret rotation and GitHub setup have real external effects and are not run by the generator or local test suite.
+Commands include `init`, `check`, `doctor`, `bootstrap`, `base`, `seed`, `build`, `env up/down/list/status`, `secrets set-identity`, `db rotate-password`, `publish`, and `up`. Any AWS, GitHub, or remote repository mutation requires `--approve` or `BACKSTAGE_AWS_APPROVE=true`. `db rotate-password --approve` changes the shared application role and restarts every environment service in the account; brief connection errors during restart are expected.
+`build`, `env up`, `env down`, `env status`, `env list`, and `check` run in GitHub Actions using the account's deploy role via OIDC. Run `bootstrap`, `base`, `seed`, `db rotate-password`, `secrets set-identity`, and `up` from an operator workstation using short-lived credentials; never use root or long-lived AWS keys.
 
-## Baseline and adaptations
+## CLI wire contract
 
-The imported archive is preserved under `templates/full-automation/`. Its SHA-256 is `9c1a4e68da9190dc2fd2573245c230f1ce53f673244f7745598c6bd3e32dacdc`; all three Downloads copies were identical and the original source checksums passed before adaptation. Earlier repository work is preserved, including a source snapshot under `.evidence/`; the generator's active manifest now selects this archive-based template.
+Every command writes exactly one JSON document to stdout: success `{"ok":true,"command":"…","result":{…}}`, failure `{"ok":false,"command":"…","error":{"code":"…","message":"…","retryable":false}}`. Only `--help` and `--version` print plain text. Progress is NDJSON on stderr along with child output. Exit codes are 0 success, 2 invalid input, 3 blocked/precondition/approval, 4 external tool/API failure, and 5 timeout while remote work continues.
 
-This baseline contains Backstage 1.56.5, PostgreSQL 16 on RDS, Fargate, JSONata rollout/maintenance state machines, default-deny permissions, image gates, secret/bootstrap recovery and operator automation. This changes the earlier Aurora hosting scaffold. The generator remains Rust; Backstage and the supplied operator automation run on Node. The optional supplied `portalctl` Rust helper keeps its separate Rust 1.100.0 toolchain.
+## Verification boundary
 
-Local testing exposed incomplete Terraform mock fixtures. The adapted security test supplies valid certificate ARNs and plan-time computed identifiers, with distinct task revisions, subnets and database/identity secrets. Its assertions and production policies/state-machine definitions remain intact. See `templates/full-automation/GENERATOR-PROVENANCE.md` for the exact adaptation scope.
-
-The original `SOURCE-SHA256SUMS` is emitted as `provenance/archive-SOURCE-SHA256SUMS`, explicitly historical rather than a manifest for rendered files. The archive's preparation logs are also historical; they do not replace fresh test evidence.
-
-## Verify
-
-```sh
-cargo fmt --all -- --check
-cargo check --locked --workspace --all-targets --all-features
-cargo clippy --locked --workspace --lib --bins --examples --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-cargo build --locked --release
-```
-
-Generator tests cover the complete output, deployment JSON, immutable owner binding, deterministic generation, preserved binary assets/expressions, executable scripts, copied-binary offline use, invalid inputs and existing-path preservation. CI also configures the generated project and runs its supplied automation checks and application build/tests.
-
-Fresh local evidence is recorded in `.evidence/automation-adoption.md`. Original preparation limits remain limits until exercised: fake AWS tests and Terraform mocks do not establish actual AWS IAM, Step Functions execution, TLS/DNS, ECR/ECS operation or real GitHub authentication. Docker image execution and AWS deployment remain separate acceptance checks. No AWS resources or GitHub settings were changed during this adoption.
+CI runs Rust checks, initializes a rendered project, and invokes offline `check`. This does not exercise a real AWS account. No real-account OIDC, Terraform apply, Fargate deployment, database/TLS, DNS, sign-in, or recovery has been run or verified, and the generated workflows have never run on GitHub.

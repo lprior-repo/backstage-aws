@@ -1,4 +1,4 @@
-name: Verify
+name: CI
 on:
   pull_request:
   push:
@@ -6,62 +6,39 @@ on:
 permissions:
   contents: read
 jobs:
-  generator:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy --no-self-update
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select pinned Rust toolchain
+        run: rustup show active-toolchain
       - run: cargo fmt --all -- --check
-      - run: cargo check --locked --workspace --all-targets --all-features
-      - run: cargo clippy --locked --workspace --lib --bins --examples --all-features -- -D warnings
-      - run: cargo test --locked --workspace --all-features
+      - run: cargo check --locked --workspace --all-targets
+      - run: cargo clippy --locked --workspace --lib --bins -- -D warnings
+      - run: cargo test --locked --workspace
       - run: cargo build --locked --release
-      - run: target/release/backstage-aws generator.example.toml .cache/generated
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          node-version: '24.22.1'
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
-        with:
-          terraform_version: '1.17.2'
-      - name: Configure and test generated automation without AWS credentials
-        working-directory: .cache/generated
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - name: Initialize and check generated project offline
+        env:
+          BACKSTAGE_AWS_NAME: example-portal
+          BACKSTAGE_AWS_AWS_ACCOUNT_ID: "123456789012"
+          BACKSTAGE_AWS_AWS_REGION: us-east-1
+          BACKSTAGE_AWS_DOMAIN_NAME: portal.example.com
+          BACKSTAGE_AWS_ROUTE53_ZONE_ID: Z123456789ABC
+          BACKSTAGE_AWS_GITHUB_REPOSITORY: example-owner/example-portal
+          BACKSTAGE_AWS_OWNER_GITHUB_ID: "123456789"
+          BACKSTAGE_AWS_BUDGET_EMAIL: budget@example.com
+          BACKSTAGE_AWS_ALERT_EMAIL: alerts@example.com
+          BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS: 192.0.2.0/24
         run: |
-          ./platform configure
-          ./scripts/check-automation.sh
-      - name: Compile and test generated application
-        working-directory: .cache/generated/app
-        run: |
-          corepack enable
-          corepack yarn install --immutable
-          corepack yarn tsc
-          corepack yarn test --watch=false --runInBand
-          corepack yarn build:backend
-  app:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '24.14.0'
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn tsc
-      - run: yarn test --watch=false --runInBand
-      - run: yarn test:bootstrap
-      - run: yarn lint:all
-      - run: yarn build:backend
-      - run: docker build -f packages/backend/Dockerfile -t backstage:ci .
-  terraform:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
-        with:
-          terraform_version: '1.17.2'
-      - run: terraform fmt -check -recursive infra
-      - run: terraform -chdir=infra/bootstrap init -backend=false -input=false
-      - run: terraform -chdir=infra/bootstrap validate
-      - run: terraform -chdir=infra/portal init -backend=false -input=false
-      - run: terraform -chdir=infra/portal validate
-      - run: terraform -chdir=infra/portal test
+          set -euo pipefail
+          output="$RUNNER_TEMP/backstage-aws-generated-$GITHUB_RUN_ID"
+          target/release/backstage-aws init --output "$output"
+          cd "$output"
+          "$GITHUB_WORKSPACE/target/release/backstage-aws" check

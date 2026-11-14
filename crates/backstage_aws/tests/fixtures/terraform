@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stand-in for Terraform in the crate's tests.
+#
+# `version` reports whatever follows the last hyphen of the name it was invoked
+# by, so a symlink named `terraform-1.17.2` claims to be 1.17.2. Every other
+# command expects to run in <project>/infra/<stack>: it appends the stack and
+# its arguments to <project>/calls.log, and fails when <project>/fail-<command>
+# exists.
+if [ "$1" = version ]; then
+  echo "{\"terraform_version\":\"${0##*-}\"}"
+  exit 0
+fi
+echo "$(basename "$PWD"): $*" >> ../../calls.log
+[ ! -e "../../fail-$1" ]

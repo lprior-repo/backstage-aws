@@ -4,12 +4,36 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "Generate a configured Backstage application and AWS Terraform from one binary"
+description = "Bootstrap and operate Backstage on AWS Fargate with Terraform and GitHub Actions OIDC"
+repository = "https://github.com/lprior-repo/backstage-aws"
 
 [dependencies]
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.150"
-toml = { version = "=1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+aws-config = { version = "1.13.2", default-features = false, features = ["default-https-client", "rt-tokio", "sso", "credentials-process", "behavior-version-latest"] }
+aws-sdk-ecr = { version = "1.140.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-ecs = { version = "1.159.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-elasticloadbalancingv2 = { version = "1.136.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.159.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-secretsmanager = { version = "1.128.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-sts = { version = "1.126.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-smithy-runtime-api = "1.21.0"
+aws-smithy-types = "1.9.4"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+include_dir = "0.7.4"
+octocrab = "0.54.9"
+regex = "1.13.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "rt-multi-thread", "time", "macros", "process", "io-util"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+aws-smithy-mocks = "0.3.0"
+tempfile = "3.27.0"
+aws-sdk-ecs = { version = "1.159.0", default-features = false, features = ["test-util"] }
+aws-sdk-elasticloadbalancingv2 = { version = "1.136.0", default-features = false, features = ["test-util"] }
+aws-sdk-s3 = { version = "1.159.0", default-features = false, features = ["test-util"] }
+aws-sdk-secretsmanager = { version = "1.128.0", default-features = false, features = ["test-util"] }
+tokio = { version = "1.54.1", default-features = false, features = ["test-util"] }

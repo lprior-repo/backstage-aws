@@ -1,0 +1,58 @@
+{
+  "name": "backend",
+  "version": "0.0.0",
+  "main": "dist/index.cjs.js",
+  "types": "src/index.ts",
+  "private": true,
+  "backstage": {
+    "role": "backend"
+  },
+  "scripts": {
+    "start": "backstage-cli package start",
+    "build": "backstage-cli package build",
+    "lint": "backstage-cli package lint",
+    "test": "backstage-cli package test",
+    "clean": "backstage-cli package clean",
+    "build-image": "docker build ../.. -f Dockerfile --tag backstage"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "3.1164.0",
+    "@backstage/backend-defaults": "0.18.1",
+    "@backstage/backend-plugin-api": "1.11.0",
+    "@backstage/config": "1.3.10",
+    "@backstage/errors": "1.3.2",
+    "@backstage/plugin-app-backend": "0.5.19",
+    "@backstage/plugin-auth-backend": "0.30.2",
+    "@backstage/plugin-auth-backend-module-github-provider": "0.5.8",
+    "@backstage/plugin-auth-backend-module-guest-provider": "0.2.24",
+    "@backstage/plugin-catalog-backend": "4.0.2",
+    "@backstage/plugin-catalog-backend-module-logs": "0.1.27",
+    "@backstage/plugin-catalog-backend-module-scaffolder-entity-model": "0.2.25",
+    "@backstage/plugin-permission-backend": "0.7.17",
+    "@backstage/plugin-permission-common": "0.9.12",
+    "@backstage/plugin-permission-node": "0.11.5",
+    "@backstage/plugin-scaffolder-backend": "4.2.2",
+    "@backstage/plugin-scaffolder-common": "2.3.1",
+    "@backstage/plugin-scaffolder-node": "0.13.8",
+    "@backstage/plugin-search-backend": "2.1.8",
+    "@backstage/plugin-search-backend-module-catalog": "0.3.20",
+    "@backstage/plugin-search-backend-module-pg": "0.5.60",
+    "@backstage/plugin-user-settings-backend": "0.4.8",
+    "app": "link:../app",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@backstage/backend-test-utils": "1.11.8",
+    "@backstage/cli": "0.36.7",
+    "@backstage/plugin-scaffolder-node-test-utils": "0.3.16",
+    "@types/node": "^24.0.0",
+    "jest": "^30.5.0",
+    "react": "^18.0.2",
+    "react-dom": "^18.0.2",
+    "react-router-dom": "^6.30.2"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "Apache-2.0"
+}

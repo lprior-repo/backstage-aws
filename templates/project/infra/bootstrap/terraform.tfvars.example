@@ -1,3 +1,0 @@
-region            = "__BACKSTAGE_AWS_REGION__"
-state_bucket_name = "__BACKSTAGE_AWS_BUCKET__"
-name              = "__BACKSTAGE_AWS_NAME__"

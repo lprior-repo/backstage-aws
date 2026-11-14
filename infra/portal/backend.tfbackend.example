@@ -1,5 +1,0 @@
-bucket       = "REPLACE-backstage-state-ACCOUNT-REGION"
-key          = "portal/terraform.tfstate"
-region       = "us-east-1"
-encrypt      = true
-use_lockfile = true

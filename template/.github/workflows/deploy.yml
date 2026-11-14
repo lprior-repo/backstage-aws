@@ -1,0 +1,56 @@
+name: Deploy production environment
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: Optional image digest to deploy
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: backstage-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      BACKSTAGE_AWS_NAMESPACE: production
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+    steps:
+      - id: environment
+        name: Skip until production is bootstrapped
+        env:
+          DEPLOY_ROLE_ARN: ${{ vars.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$DEPLOY_ROLE_ARN" ]; then
+            echo "bootstrapped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The production environment has no BACKSTAGE_AWS_* variables; run 'backstage-aws bootstrap --environment production --approve' to enable this workflow."
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.environment.outputs.bootstrapped
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-backstage-aws
+        if: steps.environment.outputs.bootstrapped
+        with:
+          settings: ${{ toJSON(vars) }}
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        if: steps.environment.outputs.bootstrapped
+      - uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100 # v4.3.1
+        if: steps.environment.outputs.bootstrapped
+        with:
+          role-to-assume: ${{ vars.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.BACKSTAGE_AWS_AWS_REGION }}
+          allowed-account-ids: ${{ vars.BACKSTAGE_AWS_AWS_ACCOUNT_ID }}
+          role-session-name: backstage-production-${{ github.run_id }}
+      - if: steps.environment.outputs.bootstrapped
+        run: backstage-aws env up --scan --approve ${IMAGE_DIGEST:+--digest="$IMAGE_DIGEST"}
