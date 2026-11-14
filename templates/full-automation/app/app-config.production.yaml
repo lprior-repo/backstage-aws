@@ -1,0 +1,19 @@
+app:
+  baseUrl: ${APP_BASE_URL}
+
+backend:
+  baseUrl: ${BACKEND_BASE_URL}
+  cors:
+    origin: ${APP_BASE_URL}
+catalog:
+  locations:
+    - type: file
+      target: ./catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    - type: file
+      target: ./catalog/entities.yaml
+    - type: file
+      target: ./catalog/templates/rollout/template.yaml
+      rules:
+        - allow: [Template]

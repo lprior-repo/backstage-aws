@@ -1,0 +1,23 @@
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-operators
+  description: Trusted operators permitted to roll out this portal
+spec:
+  type: team
+  children: []
+  members: [platform-owner]
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: platform-owner
+  annotations:
+    # Replace with the immutable numeric GitHub ID before building the image.
+    # Example lookup: https://api.github.com/users/YOUR_GITHUB_LOGIN
+    # This placeholder intentionally matches no actual GitHub account.
+    github.com/user-id: 'REPLACE_WITH_GITHUB_NUMERIC_ID'
+spec:
+  profile:
+    displayName: Platform Owner
+  memberOf: [platform-operators]

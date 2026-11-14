@@ -1,0 +1,10 @@
+name                     = "__BACKSTAGE_AWS_NAME__"
+region                   = "__BACKSTAGE_AWS_REGION__"
+service_count            = 0
+hostname                 = "__BACKSTAGE_AWS_HOSTNAME__"
+route53_zone_id          = "__BACKSTAGE_AWS_ZONE__"
+image                    = "__BACKSTAGE_AWS_ACCOUNT__.dkr.ecr.__BACKSTAGE_AWS_REGION__.amazonaws.com/__BACKSTAGE_AWS_NAME__@sha256:__BACKSTAGE_AWS_DIGEST__"
+app_secret_arn           = "__BACKSTAGE_AWS_SECRET_ARN__"
+github_oidc_provider_arn = "arn:aws:iam::__BACKSTAGE_AWS_ACCOUNT__:oidc-provider/token.actions.githubusercontent.com"
+github_repository        = "__BACKSTAGE_AWS_REPOSITORY__"
+allowed_cidrs            = [__BACKSTAGE_AWS_CIDRS__]

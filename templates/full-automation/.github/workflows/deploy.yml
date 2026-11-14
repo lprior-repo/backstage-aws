@@ -1,0 +1,160 @@
+name: Deploy Backstage
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Optional existing ECR sha256 digest; empty builds this commit"
+        required: false
+        type: string
+      database_compatible_rollback:
+        description: "For a downgrade, confirm database compatibility after review"
+        required: false
+        type: boolean
+        default: false
+      rollback:
+        description: "Treat existing digest as an explicit rollback"
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: backstage-production-deployment
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'production' }}-build
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+      - name: Generate reviewed context
+        env:
+          CONFIG_JSON: ${{ vars.DEPLOYMENT_CONFIG_JSON }}
+          TARGET_JSON: ${{ vars.DEPLOYMENT_TARGET_JSON }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; for(const [file,value] of [["deployment.json",process.env.CONFIG_JSON],["deployment-target.json",process.env.TARGET_JSON]]){JSON.parse(value);fs.writeFileSync(file,value,{mode:0o600})}'
+          ./platform configure
+          node --test automation/*.test.mjs app/scripts/bootstrap-db.test.mjs
+      - uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          role-duration-seconds: 7200
+          role-session-name: backstage-build-${{ github.run_id }}
+      - name: Build once or select retained digest; enforce scan gate
+        id: image
+        env:
+          REQUESTED_DIGEST: ${{ inputs.image_digest }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$REQUESTED_DIGEST" ]]; then
+            DIGEST="$REQUESTED_DIGEST"
+          else
+            ./platform build --target deployment-target.json --tag "git-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            DIGEST="$(jq -er .imageDigest automation/local/image.json)"
+          fi
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          ./platform scan --target deployment-target.json --digest "$DIGEST"
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'production' }}-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100
+        with:
+          role-to-assume: ${{ vars.AWS_INFRASTRUCTURE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          role-duration-seconds: 7200
+          role-session-name: backstage-deploy-${{ github.run_id }}
+      - name: Configure backend; keep credentials outside Terraform files
+        env:
+          CONFIG_JSON: ${{ vars.DEPLOYMENT_CONFIG_JSON }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+          TF_STATE_KMS_KEY: ${{ vars.TF_STATE_KMS_KEY }}
+          AWS_REGION_SELECTED: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_SELECTED: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const env=process.env;
+          JSON.parse(env.CONFIG_JSON);
+          fs.writeFileSync('deployment.json',env.CONFIG_JSON,{mode:0o600});
+          const backend={bucket:env.TF_STATE_BUCKET,key:env.TF_STATE_KEY,region:env.AWS_REGION_SELECTED,kms_key_id:env.TF_STATE_KMS_KEY,encrypt:true,use_lockfile:true,allowed_account_ids:[env.AWS_ACCOUNT_SELECTED]};
+          fs.writeFileSync('infra/core/backend.local.hcl',Object.entries(backend).map(([k,v])=>`${k} = ${JSON.stringify(v)}`).join('\n')+'\n',{mode:0o600});
+          JS
+          ./platform configure
+      - name: Validate JSONata definitions offline
+        run: |
+          npm ci --prefix infra/tools --ignore-scripts --no-audit --no-fund
+          npm run render --prefix infra/tools
+          npm test --prefix infra/tools
+          terraform fmt -check -recursive infra
+          for stack in bootstrap core; do
+            terraform -chdir="infra/$stack" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="infra/$stack" validate
+            terraform -chdir="infra/$stack" test
+          done
+      - name: Validate both JSONata state machines with AWS before activation
+        run: |
+          set -euo pipefail
+          mkdir -p automation/local
+          for definition in infra/core/tests/fixtures/*.asl.json; do
+            name="$(basename "$definition")"
+            aws stepfunctions validate-state-machine-definition --definition "file://$definition" --type STANDARD --severity WARNING > "automation/local/$name.validation.json"
+            jq -e '.result == "OK"' "automation/local/$name.validation.json"
+          done
+      - name: Snapshot, apply pinned image and perform bounded rollout
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          IS_ROLLBACK: ${{ inputs.rollback }}
+          DATABASE_COMPATIBLE: ${{ inputs.database_compatible_rollback }}
+        run: |
+          set -euo pipefail
+          if [[ "$IS_ROLLBACK" == "true" ]]; then
+            [[ "$DATABASE_COMPATIBLE" == "true" ]] || { echo 'Database compatibility review is required'; exit 1; }
+            ./platform rollback --digest "$IMAGE_DIGEST" --database-compatible
+          else
+            ./platform release --digest "$IMAGE_DIGEST"
+          fi
+          ./platform validate-workflow
+      - name: Upload nonsecret release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backstage-release-${{ github.run_id }}
+          path: |
+            evidence/runs/
+            automation/local/live-validation.json
+            automation/local/last-execution.json
+            automation/local/workflow-validation.json
+          if-no-files-found: warn
+          retention-days: 30

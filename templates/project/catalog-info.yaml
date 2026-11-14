@@ -1,0 +1,10 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: __BACKSTAGE_AWS_NAME__
+  annotations:
+    github.com/project-slug: __BACKSTAGE_AWS_REPOSITORY__
+spec:
+  type: website
+  owner: group:default/platform
+  lifecycle: experimental

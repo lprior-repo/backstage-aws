@@ -1,0 +1,45 @@
+✔ first bootstrap stores credentials before creating the login and releases the lock (4.015682ms)
+✔ rerun preserves the existing password without writing another secret version (1.098175ms)
+✔ concurrent bootstrap fails before any secret mutation (1.138045ms)
+✔ partial SQL failure leaves saved credentials available for recovery and closes the session (2.039609ms)
+✔ existing elevated roles or role memberships fail before any role or grant mutation (1.630006ms)
+✔ invalid role identifiers and unexpected app secret identity fail closed (0.840297ms)
+✔ SCRAM verifier validates both independent RFC 7677 section 3 proofs (1.368322ms)
+✔ SCRAM verifier rejects malformed inputs and uses a fresh random salt (3.137348ms)
+✔ explicit rotation stores a new application password before DB reconciliation (1.189612ms)
+✔ failed rotation retains the selected new credential for a normal recovery rollout (1.925342ms)
+✔ rotation rejects elevated role attributes before changing the application secret (0.253672ms)
+✔ real operator CLI stops before snapshot/apply/rollout when a secret, lock or image gate blocks (1631.279835ms)
+✔ real operator CLI snapshots before applying a pinned image; failed remote rollout is retained as blocked evidence (1064.292792ms)
+Execution: arn:aws:states:us-east-1:123456789012:execution:backstage-portal-rollout:test
+Execution: arn:aws:states:us-east-1:123456789012:execution:backstage-database-rotation:test
+✔ configuration rejects wrong types, open ingress, injection and reserved secret names (2.586628ms)
+✔ configure creates references and config only; it does not write secret values (2.386256ms)
+✔ account mismatch and root credentials fail before any AWS mutation (0.725353ms)
+✔ target rejects a cross-account manifest or altered ECR destination (1.188982ms)
+✔ identity template is private and refuses overwrite (0.972466ms)
+✔ identity upload uses a file reference and returns only secret-version metadata (1.109723ms)
+✔ scan blocks high findings, unknown status, missing timestamp and stale results (4.214842ms)
+✔ scan retry is bounded and only known not-yet-published scan errors are retried (1.732702ms)
+✔ lock recovery refuses active executions and does not delete another owners lock (0.932596ms)
+✔ rollout refuses a nominally successful execution for the wrong task revision (1.464046ms)
+✔ rotation starts only the maintenance state machine with an explicit operation (0.7636ms)
+✔ partial live validation never claims full release/security success (1.401593ms)
+✔ JSONata contract rejects JSONPath at every nested level (0.314844ms)
+✔ wrong-account credentials stop each AWS-mutating entry point before a mutation (883.517405ms)
+✔ identity upload passes only a file reference and restricts local permissions (499.915164ms)
+✔ invalid or multiple identity JSON documents cannot be uploaded (422.349383ms)
+✔ deploy checks identity version metadata before building or applying (325.96376ms)
+✔ successful deployment pins the pushed digest, applies it, then starts the workflow (1433.022604ms)
+✔ an apply failure or unexpected approved digest prevents workflow activation (2085.599911ms)
+✔ provision confirms migrated bootstrap state before initializing the core stack (571.123284ms)
+✔ declining migration stops before core initialization and prevents blind bootstrap re-apply (475.838787ms)
+✔ failed backend output preserves an existing configuration instead of truncating it (220.905122ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7028.767761

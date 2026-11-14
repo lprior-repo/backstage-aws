@@ -1,0 +1,20 @@
+{
+  "awsAccountId": "123456789012",
+  "awsRegion": "us-east-1",
+  "name": "backstage",
+  "environment": "production",
+  "domainName": "backstage.example.com",
+  "route53ZoneId": "Z_REPLACE_WITH_PUBLIC_ZONE",
+  "allowedIngressCidrs": ["203.0.113.10/32"],
+  "githubRepository": "YOUR_ORG/YOUR_REPO",
+  "ownerGithubId": "REPLACE_WITH_NUMERIC_GITHUB_ID",
+  "budgetEmail": "operator@example.com",
+  "monthlyBudgetUsd": 300,
+  "alertEmail": "operator@example.com",
+  "accountBaseline": true,
+  "singleNatGateway": false,
+  "databaseMultiAz": true,
+  "portalDesiredCount": 2,
+  "maximumHighFindings": 0,
+  "maximumCriticalFindings": 0
+}

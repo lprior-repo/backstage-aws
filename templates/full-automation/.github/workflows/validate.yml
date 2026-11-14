@@ -1,0 +1,127 @@
+name: Validate source
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  infrastructure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - name: Evaluate actual workflow definition and decision branches offline
+        run: |
+          npm ci --prefix infra/tools --ignore-scripts --no-audit --no-fund
+          npm run render --prefix infra/tools
+          npm test --prefix infra/tools
+          git diff --exit-code -- infra/core/tests/fixtures
+      - name: Format, schema validation, and mocked security assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive infra
+          for stack in bootstrap core; do
+            terraform -chdir="infra/$stack" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="infra/$stack" validate
+            terraform -chdir="infra/$stack" test
+          done
+      - name: Operator safety tests and shell syntax
+        run: |
+          for script in scripts/*.sh; do bash -n "$script"; done
+          node --test scripts/operator.test.mjs automation/*.test.mjs
+
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --no-node-snapshot --max-old-space-size=4096
+    services:
+      postgres:
+        image: postgres:16@sha256:63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-integration-only
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+        ports:
+          - "127.0.0.1:5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - name: Install native Node build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 make g++ pkg-config libsecret-1-dev
+      - name: Install exact dependencies
+        run: corepack yarn install --immutable
+      - name: Compile and test application
+        run: |
+          corepack yarn tsc
+          corepack yarn test --watch=false --runInBand
+          node --test scripts/bootstrap-db.test.mjs
+          corepack yarn build:backend
+      - name: Verify SQL permissions and SCRAM authentication against PostgreSQL 16
+        env:
+          RUN_POSTGRES_INTEGRATION: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: ci-bootstrap-integration-only
+          PGDATABASE: postgres
+        run: node --test scripts/bootstrap-postgres.integration.mjs
+      - name: Build runtime image and check bootstrap dependencies
+        run: |
+          docker build --platform linux/amd64 --file packages/backend/Dockerfile --tag backstage:ci .
+          docker run --rm backstage:ci node --input-type=module -e "await import('pg'); await import('@aws-sdk/client-secrets-manager'); console.log('Bootstrap imports available')"
+
+  operator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tools/portalctl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.100.0 --profile minimal --component clippy,rustfmt
+      - name: Check optional operator helper
+        run: |
+          cargo fmt --check
+          cargo check --locked --all-targets --all-features
+          cargo clippy --locked --bins --all-features -- -D warnings
+          cargo test --locked --all-features
+

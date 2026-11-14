@@ -1,0 +1,77 @@
+app:
+  title: AWS Developer Portal
+  baseUrl: http://localhost:3000
+  packages: all
+  extensions:
+    - page:catalog:
+        config:
+          path: /
+
+organization:
+  name: Platform Engineering
+
+backend:
+  baseUrl: http://localhost:7007
+  listen:
+    host: 0.0.0.0
+    port: 7007
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+  database:
+    client: pg
+    pluginDivisionMode: schema
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      database: ${POSTGRES_DB}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      ssl:
+        rejectUnauthorized: true
+        ca:
+          $file: ./certs/aws-rds-global-bundle.pem
+    knexConfig:
+      pool:
+        min: 0
+        max: 5
+
+auth:
+  environment: production
+  session:
+    secret: ${AUTH_SESSION_SECRET}
+  providers:
+    github:
+      production:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+        signIn:
+          resolvers:
+            - resolver: userIdMatchingUserEntityAnnotation
+
+permission:
+  enabled: true
+
+scaffolder:
+  taskRecovery:
+    enabled: true
+    staleTimeout: { seconds: 60 }
+
+awsBackstage:
+  rolloutStateMachineArn: ${AWS_ROLLOUT_STATE_MACHINE_ARN}
+
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource]
+  locations:
+    - type: file
+      target: ../../catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    - type: file
+      target: ../../catalog/entities.yaml
+    - type: file
+      target: ../../catalog/templates/rollout/template.yaml
+      rules:
+        - allow: [Template]

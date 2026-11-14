@@ -1,0 +1,37 @@
+# Private environment configuration and operator-generated state
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/*.auto.tfvars
+**/*.auto.tfvars.json
+**/backend.local.hcl
+**/backend.local.tf
+**/*.tfplan
+**/crash.log
+.secrets/
+**/.env
+**/.env.*
+**/app-config.local.yaml
+
+# Dependencies and build output
+**/node_modules/
+**/.yarn/cache/
+**/.yarn/install-state.gz
+**/dist/
+**/dist-types/
+**/coverage/
+**/target/
+**/playwright-report/
+**/test-results/
+.DS_Store
+
+
+# Automation generated configuration and audit artifacts
+/deployment.json
+/deployment-target.json
+/automation/local/
+/evidence/runs/
+/.operator-lock/
+**/*.tfvars.json
+!/infra/**/terraform.tfvars.example.json

@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-11-13T05:36:53.971Z",
+  "backstageRelease": "1.56.5",
+  "createAppVersion": "0.9.3",
+  "manifestUrl": "https://versions.backstage.io/v1/releases/1.56.5/manifest.json",
+  "releaseUrl": "https://github.com/backstage/backstage/releases/tag/v1.56.5",
+  "nodeVersion": "v24.22.1",
+  "yarnVersion": "4.13.0",
+  "nodeImage": {
+    "tag": "24.22.1-trixie-slim",
+    "digest": "sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a",
+    "lastUpdated": "2026-10-28T05:40:34.381601Z"
+  },
+  "awsSdkVersion": "3.1164.0",
+  "notes": [
+    "All direct @backstage package versions are pinned from the official release manifest.",
+    "AWS SDK version selected before the generated Yarn three-day npm age gate.",
+    "Container build dependencies include Python and C++ for native Node modules; runtime has no authored Python code."
+  ]
+}

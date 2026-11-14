@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-11-14T03:09:45.903Z",
+  "artifact": "Backstage AWS full automation source",
+  "backstageVersion": "1.56.5",
+  "nodeVersion": "v24.22.1",
+  "terraformVersion": "1.17.2",
+  "localChecks": {
+    "nodeTests": {
+      "status": "complete",
+      "passed": 35,
+      "failed": 0
+    },
+    "jsonataTests": {
+      "status": "complete",
+      "passed": 21,
+      "failed": 0
+    },
+    "terraformFormat": {
+      "status": "complete"
+    },
+    "actualDefinitionRendering": {
+      "status": "complete",
+      "fixtures": 4
+    },
+    "bashSyntax": {
+      "status": "complete"
+    },
+    "javascriptSyntax": {
+      "status": "complete"
+    },
+    "workflowYaml": {
+      "status": "complete"
+    }
+  },
+  "providerSchemaAndMockTests": {
+    "status": "blocked",
+    "reason": "AWS provider cannot bind its Unix socket in this execution environment"
+  },
+  "dockerAndApplicationBuild": {
+    "status": "needs verification",
+    "reason": "Docker daemon unavailable; application build/Jest/TypeScript and native PostgreSQL integration were not rerun"
+  },
+  "awsDeployment": {
+    "status": "unknown",
+    "reason": "No customer AWS credentials used; no infrastructure deployment or live security result claimed"
+  },
+  "githubDeployment": {
+    "status": "unknown",
+    "reason": "Workflow supplied as source; no GitHub environment or workflow run created"
+  }
+}

@@ -1,0 +1,9 @@
+region                    = "us-east-1"
+service_count             = 0
+hostname                  = "backstage.example.com"
+route53_zone_id           = "Z_REPLACE"
+image                     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/backstage@sha256:REPLACE_WITH_64_HEX_DIGEST"
+app_secret_arn            = "arn:aws:secretsmanager:us-east-1:123456789012:secret:backstage-oauth-REPLACE"
+github_oidc_provider_arn  = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+github_repository         = "lprior-repo/backstage-aws"
+allowed_cidrs             = ["203.0.113.10/32"]

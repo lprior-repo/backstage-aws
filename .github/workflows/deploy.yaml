@@ -1,0 +1,65 @@
+name: Deploy portal
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: backstage-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.14.0'
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn tsc
+      - run: yarn test --watch=false --runInBand
+      - run: yarn test:bootstrap
+      - run: yarn lint:all
+      - run: yarn build:backend
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: login
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd
+      - id: image
+        env:
+          REGISTRY: ${{ steps.login.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          docker build -f packages/backend/Dockerfile -t "$image" .
+          docker push "$image"
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image")
+          echo "uri=$digest" >> "$GITHUB_OUTPUT"
+      - name: Read latest managed task definition
+        env:
+          FAMILY: ${{ vars.ECS_TASK_FAMILY }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition --task-definition "$FAMILY" --query taskDefinition > task-definition.json
+      - id: task
+        uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7
+        with:
+          task-definition: task-definition.json
+          container-name: backstage
+          image: ${{ steps.image.outputs.uri }}
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b
+        with:
+          task-definition: ${{ steps.task.outputs.task-definition }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
+          wait-for-minutes: 15

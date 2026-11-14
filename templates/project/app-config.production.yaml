@@ -1,0 +1,60 @@
+# Standalone config: never merge the development guest provider into production.
+app:
+  title: __BACKSTAGE_AWS_NAME__
+  baseUrl: ${BASE_URL}
+  packages: all
+organization:
+  name: Platform Engineering
+backend:
+  baseUrl: ${BASE_URL}
+  listen: ':7007'
+  trustProxy: 1
+  cors:
+    origin: ${BASE_URL}
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+  database:
+    client: pg
+    pluginDivisionMode: schema
+    ensureSchemaExists: true
+    connection:
+      host: ${POSTGRES_HOST}
+      port: 5432
+      database: backstage
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      ssl:
+        rejectUnauthorized: true
+        ca:
+          $file: ${RDS_CA_BUNDLE}
+auth:
+  environment: production
+  providers:
+    github:
+      production:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+        signIn:
+          resolvers:
+            - resolver: usernameMatchingUserEntityName
+integrations:
+  github:
+    - host: github.com
+      token: ${GITHUB_TOKEN}
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource, Location]
+  locations:
+    - type: file
+      target: ./catalog/organization.yaml
+      rules:
+        - allow: [User, Group]
+techdocs:
+  builder: external
+  publisher:
+    type: awsS3
+    awsS3:
+      bucketName: ${TECHDOCS_BUCKET}
+      region: ${AWS_REGION}
+permission:
+  enabled: true

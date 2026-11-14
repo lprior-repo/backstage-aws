@@ -1,0 +1,32 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: backstage-rollout
+  title: Roll out the developer portal
+  description: Initialize the configured database role and replace the portal tasks using the currently configured image.
+spec:
+  owner: group:default/platform-operators
+  type: operations
+  parameters:
+    - title: Rollout details
+      properties:
+        reason:
+          title: Reason
+          type: string
+          maxLength: 160
+          description: A short reason recorded with the workflow request.
+  steps:
+    - id: rollout
+      name: Submit rollout
+      action: aws:backstage:rollout
+      input:
+        reason: ${{ parameters.reason }}
+  output:
+    links:
+      - title: Follow rollout in AWS
+        url: ${{ steps.rollout.output.consoleUrl }}
+    text:
+      - title: Request accepted
+        content: >-
+          The rollout continues in AWS. This portal may briefly reconnect while
+          its tasks are replaced. Execution: ${{ steps.rollout.output.executionArn }}

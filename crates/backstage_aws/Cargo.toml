@@ -1,0 +1,15 @@
+[package]
+name = "backstage-aws"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Generate a configured Backstage application and AWS Terraform from one binary"
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.150"
+toml = { version = "=1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+
+[lints]
+workspace = true

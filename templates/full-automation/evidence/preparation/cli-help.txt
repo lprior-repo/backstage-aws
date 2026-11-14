@@ -1,0 +1,29 @@
+Backstage AWS automation (Node + AWS CLI + Terraform + Docker)
+
+./platform configure --config deployment.json
+./platform doctor --config deployment.json
+./platform secrets-init --file .secrets/github-identity.json
+./platform up --identity .secrets/github-identity.json
+./platform export-target
+./platform build --target deployment-target.json [--tag UNIQUE_TAG]
+./platform scan --digest sha256:...
+./platform release [--digest sha256:...] [--tag UNIQUE_TAG]
+./platform rollback --digest sha256:... --database-compatible
+./platform snapshot
+./platform rollout
+./platform secrets-set --identity .secrets/github-identity.json
+./platform secrets-put --name plugin-name --file .secrets/value.json
+./platform secrets-rotate --identity .secrets/github-identity.json
+./platform db-rotate --maintenance-window
+./platform validate-live
+./platform validate-workflow
+./platform recover-lock --execution EXECUTION_ARN
+./platform latest
+./platform upgrade [--version 1.56.5]
+./platform github-setup
+./platform restore-drill --snapshot SNAPSHOT_ID --new-id UNIQUE_DB_IDENTIFIER
+
+All commands accept --config FILE. Build/scan can use a nonsecret --target FILE.
+Release and rollback show a Terraform plan before activation. Do not run concurrent
+Terraform writers outside the protected CI workflow. Secrets are passed by file,
+not command-line value. See docs/AUTOMATION.md for prerequisites and recovery.

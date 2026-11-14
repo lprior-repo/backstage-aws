@@ -1,0 +1,5 @@
+bucket       = "__BACKSTAGE_AWS_BUCKET__"
+key          = "portal/terraform.tfstate"
+region       = "__BACKSTAGE_AWS_REGION__"
+encrypt      = true
+use_lockfile = true
