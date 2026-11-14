@@ -59,9 +59,23 @@ variable "allowed_ingress_cidrs" {
   }
 }
 
-variable "single_nat_gateway" {
-  type    = bool
-  default = true
+variable "nat_gateways" {
+  type        = number
+  default     = 0
+  description = "0 gives tasks public addresses and no NAT charge; 1 or 2 keeps tasks private behind that many NAT gateways."
+  validation {
+    condition     = contains([0, 1, 2], var.nat_gateways)
+    error_message = "Use 0, 1 or 2 NAT gateways."
+  }
+}
+
+variable "database_instance_class" {
+  type    = string
+  default = "db.t4g.micro"
+  validation {
+    condition     = can(regex("^db\\.[a-z0-9]+\\.[a-z0-9]+$", var.database_instance_class))
+    error_message = "Use an RDS instance class such as db.t4g.micro."
+  }
 }
 
 variable "database_multi_az" {

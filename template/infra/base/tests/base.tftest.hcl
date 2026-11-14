@@ -90,6 +90,14 @@ run "base_security_and_outputs" {
     error_message = "Seed bucket must block public access."
   }
   assert {
+    condition     = length(aws_nat_gateway.main) == 0 && output.assign_public_ip && output.db_admin_network_configuration.awsvpcConfiguration.assignPublicIp == "ENABLED" && alltrue([for route in aws_route.application : route.nat_gateway_id == null])
+    error_message = "Without NAT gateways, tasks must get public addresses and route through the internet gateway."
+  }
+  assert {
+    condition     = aws_s3_bucket_versioning.seed.versioning_configuration[0].status == "Enabled"
+    error_message = "Seed and dump objects must stay recoverable after being replaced."
+  }
+  assert {
     condition     = !strcontains(local.application_execution_secrets_policy, aws_db_instance.database.master_user_secret[0].secret_arn)
     error_message = "Application execution role must not read the master secret."
   }

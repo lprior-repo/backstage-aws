@@ -1,11 +1,11 @@
 name: Setup backstage-aws
+description: Install Terraform and the backstage-aws CLI, and load one environment's settings.
 inputs:
-  settings:
+  environment:
     description: >-
-      Pass `toJSON(vars)`. Every BACKSTAGE_AWS_* variable that `backstage-aws
-      bootstrap` published to the job's GitHub environment becomes a setting
-      for the following steps.
-    default: "{}"
+      Optional committed settings file: `environments/<environment>.env`.
+      Omit for offline validation.
+    required: false
 runs:
   using: composite
   steps:
@@ -13,15 +13,20 @@ runs:
       with:
         terraform_version: 1.17.2
         terraform_wrapper: false
-    - name: Export settings
+    - name: Load settings
+      if: inputs.environment != ''
       shell: bash
       env:
-        SETTINGS: ${{ inputs.settings }}
+        ENVIRONMENT: ${{ inputs.environment }}
       run: |
         set -euo pipefail
-        jq -r 'to_entries[]
-          | select((.key | startswith("BACKSTAGE_AWS_")) and (.value | test("[\r\n]") | not))
-          | "\(.key)=\(.value)"' <<<"$SETTINGS" >> "$GITHUB_ENV"
+        set -a
+        . "environments/$ENVIRONMENT.env"
+        set +a
+        delimiter="BACKSTAGE_AWS_$(cat /proc/sys/kernel/random/uuid)"
+        for key in "${!BACKSTAGE_AWS_@}"; do
+          printf '%s<<%s\n%s\n%s\n' "$key" "$delimiter" "${!key}" "$delimiter" >> "$GITHUB_ENV"
+        done
     - name: Download and verify backstage-aws
       shell: bash
       env:

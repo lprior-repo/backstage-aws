@@ -18,6 +18,7 @@ override_data {
       ecs_cluster_arn                 = "arn:aws:ecs:us-east-1:123456789012:cluster/backstage"
       session_secret_arn              = "arn:aws:secretsmanager:us-east-1:123456789012:secret:backstage/session"
       application_subnet_ids          = ["subnet-12345678"]
+      assign_public_ip                = true
       application_execution_role_arn  = "arn:aws:iam::123456789012:role/backstage-portal-execution"
       application_task_role_arn       = "arn:aws:iam::123456789012:role/backstage-portal-task"
       portal_security_group_id        = "sg-12345678"
@@ -59,6 +60,10 @@ run "guest_mode_is_fast_and_digest_pinned" {
       if contains(["POSTGRES_DB", "APP_BASE_URL", "BACKEND_BASE_URL"], item.name)
     } == { POSTGRES_DB = "pr_38", APP_BASE_URL = "https://pr-38.example.com", BACKEND_BASE_URL = "https://pr-38.example.com" }
     error_message = "Database name and base URLs follow the namespace."
+  }
+  assert {
+    condition     = one(aws_ecs_service.env.capacity_provider_strategy).capacity_provider == "FARGATE" && one(aws_ecs_service.env.network_configuration).assign_public_ip
+    error_message = "A service uses on-demand capacity unless Spot is requested, and takes its addressing from the base stack."
   }
   assert {
     condition     = contains([for secret in jsondecode(aws_ecs_task_definition.env.container_definitions)[0].secrets : secret.name], "AUTH_SESSION_SECRET")

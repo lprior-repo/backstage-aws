@@ -24,7 +24,7 @@ regex = "1.13.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", default-features = false, features = ["rt", "rt-multi-thread", "time", "macros", "process", "io-util"] }
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "rt-multi-thread", "time", "macros", "process", "io-util", "fs"] }
 
 [lints]
 workspace = true

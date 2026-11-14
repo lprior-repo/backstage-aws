@@ -18,16 +18,18 @@ output "db_admin_init_task_definition_arn" { value = aws_ecs_task_definition.db_
 output "db_admin_rotate_task_definition_arn" { value = aws_ecs_task_definition.db_admin_init["rotate"].arn }
 output "db_admin_seed_task_definition_arn" { value = aws_ecs_task_definition.db_admin_clone.arn }
 output "db_admin_seed_restore_task_definition_arn" { value = aws_ecs_task_definition.db_admin_seed_restore.arn }
+output "db_admin_dump_task_definition_arn" { value = aws_ecs_task_definition.db_admin_dump.arn }
 output "db_admin_network_configuration" {
   value = {
     awsvpcConfiguration = {
       subnets        = aws_subnet.application[*].id
       securityGroups = [aws_security_group.admin.id]
-      assignPublicIp = "DISABLED"
+      assignPublicIp = var.nat_gateways == 0 ? "ENABLED" : "DISABLED"
     }
   }
 }
 output "application_subnet_ids" { value = aws_subnet.application[*].id }
+output "assign_public_ip" { value = var.nat_gateways == 0 }
 output "db_admin_security_group_id" { value = aws_security_group.admin.id }
 output "kms_key_arn" { value = aws_kms_key.app.arn }
 output "log_groups" { value = { db_admin = aws_cloudwatch_log_group.db_admin.name, portal = aws_cloudwatch_log_group.portal.name } }

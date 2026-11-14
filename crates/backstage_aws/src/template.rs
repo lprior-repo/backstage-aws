@@ -14,6 +14,17 @@ const MARKER: &str = "__BACKSTAGE_AWS_";
 pub(crate) struct InitResult {
     output: String,
     files: usize,
+    settings_file: String,
+}
+
+/// Records the environment's settings in the project, where CI and operators
+/// load them from. Returns the path relative to the project.
+pub(crate) fn write_settings_file(settings: &ValidatedSettings, project: &Path) -> Result<String> {
+    let failed = |error: std::io::Error| Error::state_failed(error.to_string());
+    let relative = format!("environments/{}.env", settings.settings.environment);
+    fs::create_dir_all(project.join("environments")).map_err(failed)?;
+    fs::write(project.join(&relative), settings.settings_file()).map_err(failed)?;
+    Ok(relative)
 }
 
 /// Writes the template into a new directory, substituting project values.
@@ -42,7 +53,8 @@ pub(crate) fn render_template(settings: &ValidatedSettings, output: &Path) -> Re
     }
     Ok(InitResult {
         output: output.display().to_string(),
-        files,
+        settings_file: write_settings_file(settings, output)?,
+        files: files.saturating_add(1),
     })
 }
 

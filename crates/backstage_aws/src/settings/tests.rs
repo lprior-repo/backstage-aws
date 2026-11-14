@@ -17,13 +17,16 @@ impl Settings {
             alert_email: None,
             allowed_ingress_cidrs: vec!["10.0.0.0/8".into()],
             environment: "preview".into(),
+            pull_request: None,
             namespace: Some("pr-38".into()),
             hostname: None,
             auth_mode: Some("guest".into()),
-            monthly_budget_usd: 300,
+            spot: None,
+            monthly_budget_usd: 100,
             account_baseline: true,
             network: NetworkSettings {
-                single_nat_gateway: true,
+                nat_gateways: 0,
+                database_instance_class: "db.t4g.micro".into(),
                 database_multi_az: false,
             },
             desired_count: 1,
@@ -45,7 +48,11 @@ fn outcome(change: fn(&mut Settings)) -> Result<(), &'static str> {
 
 #[test]
 fn every_invalid_setting_is_rejected_as_invalid_input() {
-    let cases: [(&str, fn(&mut Settings)); 22] = [
+    let cases: [(&str, fn(&mut Settings)); 24] = [
+        ("nat gateways", |s| s.network.nat_gateways = 3),
+        ("database class", |s| {
+            s.network.database_instance_class = "t4g.micro".into()
+        }),
         ("name too short", |s| s.name = "ab".into()),
         ("environment too short", |s| s.environment = "x".into()),
         ("account id", |s| s.aws_account_id = "123".into()),
@@ -139,5 +146,17 @@ fn blank_values_from_unset_workflow_variables_count_as_unset() -> crate::error::
     assert_eq!(validated.auth_mode, "guest");
     assert_eq!(validated.settings.github_oidc_provider_arn, None);
     assert!(validated.settings.allowed_ingress_cidrs.is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_pull_request_names_its_namespace_unless_one_is_given() -> crate::error::Result<()> {
+    let mut settings = Settings::sample(PathBuf::from("."));
+    settings.pull_request = Some(7);
+    assert_eq!(settings.validate()?.namespace, "pr-38");
+    settings.namespace = None;
+    let validated = settings.validate()?;
+    assert_eq!(validated.namespace, "pr-7");
+    assert_eq!(validated.hostname, "pr-7.preview.example.com");
     Ok(())
 }

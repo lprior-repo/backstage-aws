@@ -1,7 +1,7 @@
 //! Values derived from validated settings: the variables each Terraform stack
-//! receives and the GitHub Actions variables the bootstrap stack publishes.
+//! receives and the settings file committed to the project.
 use super::ValidatedSettings;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 impl ValidatedSettings {
     pub(crate) fn database_name(&self) -> &str {
@@ -18,6 +18,22 @@ impl ValidatedSettings {
         format!("{}-{}-{}-tfstate", s.name, s.aws_account_id, s.aws_region)
     }
 
+    /// The role CI assumes; the bootstrap stack creates it under this name.
+    pub(crate) fn deploy_role_arn(&self) -> String {
+        let s = &self.settings;
+        format!(
+            "arn:aws:iam::{}:role/{}-github-deploy",
+            s.aws_account_id, s.name
+        )
+    }
+
+    /// Spot capacity costs about a third as much and can be reclaimed at two
+    /// minutes' notice, which production must not be.
+    fn spot(&self) -> bool {
+        let s = &self.settings;
+        s.spot.unwrap_or(s.environment != "production")
+    }
+
     pub(crate) fn bootstrap_tfvars(&self) -> Value {
         let s = &self.settings;
         json!({
@@ -30,9 +46,7 @@ impl ValidatedSettings {
             "budget_email": s.budget_email,
             "monthly_budget_usd": s.monthly_budget_usd,
             "github_repository": s.github_repository,
-            "github_environment": s.environment,
-            "owner_github_id": s.owner_github_id,
-            "github_actions_variables": self.github_actions_variables(),
+            "environment": s.environment,
         })
     }
 
@@ -46,7 +60,8 @@ impl ValidatedSettings {
             "domain_name": s.domain_name,
             "route53_zone_id": s.route53_zone_id,
             "allowed_ingress_cidrs": s.allowed_ingress_cidrs,
-            "single_nat_gateway": s.network.single_nat_gateway,
+            "nat_gateways": s.network.nat_gateways,
+            "database_instance_class": s.network.database_instance_class,
             "database_multi_az": s.network.database_multi_az,
             "alert_email": s.alert_email,
             "application_secrets": self.application_secrets(),
@@ -64,6 +79,7 @@ impl ValidatedSettings {
             "domain_name": s.domain_name,
             "image_digest": digest,
             "desired_count": s.desired_count,
+            "spot": self.spot(),
             "auth_mode": self.auth_mode,
             "database_name": self.database_name,
             "application_secrets": self.application_secrets(),
@@ -84,45 +100,59 @@ impl ValidatedSettings {
         Value::Object(secrets.collect())
     }
 
-    /// Settings every workflow run needs, published as variables of the GitHub
-    /// environment. The namespace and hostname are per pull request and are
-    /// deliberately absent; the bootstrap stack adds the role and state names.
-    fn github_actions_variables(&self) -> Value {
+    /// `environments/<environment>.env`: everything a later run needs, in the
+    /// form the CLI reads it. The namespace and hostname are per pull request
+    /// and are deliberately absent.
+    pub(crate) fn settings_file(&self) -> String {
         let s = &self.settings;
-        let mut values = Map::new();
-        let mut set =
-            |key: &str, value: String| values.insert(key.to_owned(), Value::String(value));
-        set("BACKSTAGE_AWS_NAME", s.name.clone());
-        set("BACKSTAGE_AWS_AWS_ACCOUNT_ID", s.aws_account_id.clone());
-        set("BACKSTAGE_AWS_AWS_REGION", s.aws_region.clone());
-        set("BACKSTAGE_AWS_DOMAIN_NAME", s.domain_name.clone());
-        set("BACKSTAGE_AWS_ROUTE53_ZONE_ID", s.route53_zone_id.clone());
+        let mut lines = vec![
+            format!(
+                "# Settings for the `{}` environment, written by backstage-aws.",
+                s.environment
+            ),
+            format!(
+                "# Load them with: set -a; . environments/{}.env; set +a",
+                s.environment
+            ),
+        ];
+        let mut set = |key: &str, value: &dyn std::fmt::Display| {
+            lines.push(format!(
+                "BACKSTAGE_AWS_{key}='{}'",
+                value.to_string().replace('\'', "'\\''")
+            ));
+        };
+        set("NAME", &s.name);
+        set("AWS_ACCOUNT_ID", &s.aws_account_id);
+        set("AWS_REGION", &s.aws_region);
+        set("DOMAIN_NAME", &s.domain_name);
+        set("ROUTE53_ZONE_ID", &s.route53_zone_id);
+        set("GITHUB_REPOSITORY", &s.github_repository);
+        set("OWNER_GITHUB_ID", &s.owner_github_id);
+        set("ENVIRONMENT", &s.environment);
+        set("AUTH_MODE", &self.auth_mode);
+        set("ALLOWED_INGRESS_CIDRS", &s.allowed_ingress_cidrs.join(","));
+        set("PLUGIN_SECRETS", &s.plugin_secrets.join(","));
+        set("DESIRED_COUNT", &s.desired_count);
+        set("MAX_HIGH_FINDINGS", &s.max_high_findings);
+        set("MAX_CRITICAL_FINDINGS", &s.max_critical_findings);
+        set("NAT_GATEWAYS", &s.network.nat_gateways);
         set(
-            "BACKSTAGE_AWS_GITHUB_REPOSITORY",
-            s.github_repository.clone(),
+            "DATABASE_INSTANCE_CLASS",
+            &s.network.database_instance_class,
         );
-        set("BACKSTAGE_AWS_OWNER_GITHUB_ID", s.owner_github_id.clone());
-        set("BACKSTAGE_AWS_ENVIRONMENT", s.environment.clone());
-        set("BACKSTAGE_AWS_AUTH_MODE", self.auth_mode.clone());
-        set("BACKSTAGE_AWS_DESIRED_COUNT", s.desired_count.to_string());
-        set(
-            "BACKSTAGE_AWS_MAX_HIGH_FINDINGS",
-            s.max_high_findings.to_string(),
-        );
-        set(
-            "BACKSTAGE_AWS_MAX_CRITICAL_FINDINGS",
-            s.max_critical_findings.to_string(),
-        );
-        if !s.allowed_ingress_cidrs.is_empty() {
-            set(
-                "BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS",
-                s.allowed_ingress_cidrs.join(","),
-            );
-        }
-        if !s.plugin_secrets.is_empty() {
-            set("BACKSTAGE_AWS_PLUGIN_SECRETS", s.plugin_secrets.join(","));
-        }
-        Value::Object(values)
+        set("DATABASE_MULTI_AZ", &s.network.database_multi_az);
+        set("SPOT", &self.spot());
+        set("ACCOUNT_BASELINE", &s.account_baseline);
+        set("MONTHLY_BUDGET_USD", &s.monthly_budget_usd);
+        let blank = String::new();
+        set("BUDGET_EMAIL", s.budget_email.as_ref().unwrap_or(&blank));
+        set("ALERT_EMAIL", s.alert_email.as_ref().unwrap_or(&blank));
+        let provider = s.github_oidc_provider_arn.as_ref().unwrap_or(&blank);
+        set("GITHUB_OIDC_PROVIDER_ARN", provider);
+        // Not a CLI setting: the workflow passes it to the AWS sign-in step.
+        set("DEPLOY_ROLE_ARN", &self.deploy_role_arn());
+        lines.push(String::new());
+        lines.join("\n")
     }
 }
 
@@ -220,27 +250,55 @@ mod tests {
         let validated = settings.validate()?;
         assert_eq!(validated.namespace, "production");
         assert_eq!(validated.hostname, "preview.example.com");
+        let spot = |vars: Value| vars.get("spot").cloned();
+        assert_eq!(spot(validated.env_tfvars("sha256:abc")), Some(false.into()));
+        settings.spot = Some(true);
+        let vars = settings.validate()?.env_tfvars("sha256:abc");
+        assert_eq!(spot(vars), Some(true.into()));
         Ok(())
     }
 
     #[test]
-    fn published_variables_never_pin_a_namespace_or_hostname() -> Result<()> {
-        let settings = Settings::sample(PathBuf::from(".")).validate()?;
-        let bootstrap = settings.bootstrap_tfvars();
-        let published = bootstrap
-            .get("github_actions_variables")
-            .and_then(Value::as_object);
-        let keys: Vec<&String> = published
-            .into_iter()
-            .flatten()
-            .map(|(key, _)| key)
+    fn the_settings_file_roundtrips_literal_values_without_pinning_a_namespace()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut settings = Settings::sample(PathBuf::from("."));
+        settings.plugin_secrets = vec!["pagerduty=PAGERDUTY_TOKEN:token".into()];
+        settings.alert_email = Some("o'hara+${HOME}@example.com".into());
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("settings.env");
+        std::fs::write(&path, settings.validate()?.settings_file())?;
+        let output = std::process::Command::new("bash")
+            .env_clear()
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "set -a; . \"$1\"; env -0",
+                "test",
+            ])
+            .arg(path)
+            .output()?;
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let values: std::collections::HashMap<&str, &str> = stdout
+            .split('\0')
+            .filter_map(|line| line.split_once('='))
             .collect();
-        assert!(keys.iter().any(|key| *key == "BACKSTAGE_AWS_NAME"));
-        for per_pull_request in ["BACKSTAGE_AWS_NAMESPACE", "BACKSTAGE_AWS_HOSTNAME"] {
-            assert!(
-                !keys.iter().any(|key| *key == per_pull_request),
-                "{per_pull_request}"
-            );
+        assert_eq!(values.get("BACKSTAGE_AWS_NAME"), Some(&"portal"));
+        assert_eq!(
+            values.get("BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS"),
+            Some(&"10.0.0.0/8")
+        );
+        assert_eq!(
+            values.get("BACKSTAGE_AWS_PLUGIN_SECRETS"),
+            Some(&"pagerduty=PAGERDUTY_TOKEN:token")
+        );
+        assert_eq!(
+            values.get("BACKSTAGE_AWS_ALERT_EMAIL"),
+            Some(&"o'hara+${HOME}@example.com")
+        );
+        for key in ["NAMESPACE", "HOSTNAME", "PULL_REQUEST", "APPROVE"] {
+            assert!(!values.contains_key(format!("BACKSTAGE_AWS_{key}").as_str()));
         }
         Ok(())
     }

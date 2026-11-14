@@ -30,7 +30,7 @@ pub(crate) struct SeedResult {
 /// role's password from its secret. Safe to repeat.
 pub(crate) async fn initialize_database(ctx: &Ctx) -> Result<()> {
     let base = terraform::required_outputs(ctx, Stack::Base).await?;
-    run_task(ctx, &base, "db_admin_init_task_definition_arn", None).await
+    run_task(ctx, &base, "db_admin_init_task_definition_arn", Vec::new()).await
 }
 
 /// Creates the namespace database from `seed` when it does not exist yet.
@@ -52,7 +52,7 @@ async fn namespace_task(ctx: &Ctx, action: &str) -> Result<()> {
         .environment(pair("DB_NAME", ctx.settings.database_name()))
         .build();
     let task = "db_admin_seed_task_definition_arn";
-    run_task(ctx, &base, task, Some(overrides)).await
+    run_task(ctx, &base, task, vec![overrides]).await
 }
 
 /// Uploads a custom-format `pg_dump` file and restores it into `seed`.
@@ -72,7 +72,7 @@ pub(crate) async fn seed(ctx: &Ctx, file: &Path) -> Result<SeedResult> {
         .await
         .map_err(|error| Error::aws_failed("s3", "PutObject", error.to_string()))?;
     let task = "db_admin_seed_restore_task_definition_arn";
-    run_task(ctx, &base, task, None).await?;
+    run_task(ctx, &base, task, Vec::new()).await?;
     Ok(SeedResult {
         bucket,
         key: SEED_KEY,
@@ -80,12 +80,13 @@ pub(crate) async fn seed(ctx: &Ctx, file: &Path) -> Result<SeedResult> {
 }
 
 /// Runs one db-admin task definition to completion and requires every
-/// container to exit with status 0.
+/// container to exit with status 0. `overrides` holds at most one entry per
+/// container.
 pub(crate) async fn run_task(
     ctx: &Ctx,
     base: &Value,
     task_output: &str,
-    overrides: Option<ContainerOverride>,
+    overrides: Vec<ContainerOverride>,
 ) -> Result<()> {
     let cluster = output_str(base, "ecs_cluster_name")?;
     let failed = |detail: String| Error::aws_failed("ecs", "RunTask", detail);
@@ -98,7 +99,7 @@ pub(crate) async fn run_task(
         .network_configuration(network(base)?)
         .overrides(
             TaskOverride::builder()
-                .set_container_overrides(overrides.map(|one| vec![one]))
+                .set_container_overrides(Some(overrides))
                 .build(),
         )
         .send()
@@ -132,6 +133,8 @@ pub(crate) async fn run_task(
     )))
 }
 
+/// Where the base stack says db-admin tasks run. They need a public address
+/// to reach AWS APIs exactly when the deployment has no NAT gateway.
 fn network(base: &Value) -> Result<NetworkConfiguration> {
     let vpc = base.pointer("/db_admin_network_configuration/awsvpcConfiguration");
     let list = |name: &str| {
@@ -139,10 +142,11 @@ fn network(base: &Value) -> Result<NetworkConfiguration> {
         let strings = values.into_iter().flatten().filter_map(Value::as_str);
         Some(strings.map(str::to_owned).collect::<Vec<_>>())
     };
+    let public = vpc.and_then(|vpc| vpc.get("assignPublicIp")?.as_str());
     let vpc = AwsVpcConfiguration::builder()
         .set_subnets(list("subnets"))
         .set_security_groups(list("securityGroups"))
-        .assign_public_ip(AssignPublicIp::Disabled)
+        .assign_public_ip(AssignPublicIp::from(public.unwrap_or("DISABLED")))
         .build()
         .map_err(|error| Error::precondition_failed(format!("db-admin network: {error}")))?;
     Ok(NetworkConfiguration::builder()
@@ -170,7 +174,7 @@ mod tests {
             "db_admin_network_configuration": {"awsvpcConfiguration": {
                 "subnets": ["subnet-a", "subnet-b"],
                 "securityGroups": ["sg-admin"],
-                "assignPublicIp": "DISABLED",
+                "assignPublicIp": "ENABLED",
             }},
         })
     }
@@ -194,7 +198,7 @@ mod tests {
 
     async fn run(
         rules: &[&Rule],
-        overrides: Option<ContainerOverride>,
+        overrides: Vec<ContainerOverride>,
     ) -> std::result::Result<(), &'static str> {
         let dir = std::env::temp_dir();
         let mut ctx = Ctx::sample(&dir, true).map_err(|error| error.code())?;
@@ -206,7 +210,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_task_runs_privately_with_its_overrides_and_is_awaited_until_it_stops() {
+    async fn a_task_runs_where_the_base_stack_says_with_its_overrides_until_it_stops() {
         let overrides = ContainerOverride::builder()
             .name("db-admin")
             .environment(
@@ -231,7 +235,7 @@ mod tests {
                     && vpc.map(AwsVpcConfiguration::security_groups)
                         == Some(&["sg-admin".to_owned()])
                     && vpc.and_then(AwsVpcConfiguration::assign_public_ip)
-                        == Some(&AssignPublicIp::Disabled)
+                        == Some(&AssignPublicIp::Enabled)
                     && request.overrides().map(TaskOverride::container_overrides)
                         == Some(&[expected.clone()])
             })
@@ -246,7 +250,7 @@ mod tests {
             .output(|| described("RUNNING", None))
             .output(|| described("STOPPED", Some(0)))
             .build();
-        assert_eq!(run(&[&started, &progress], Some(overrides)).await, Ok(()));
+        assert_eq!(run(&[&started, &progress], vec![overrides]).await, Ok(()));
         assert_eq!(progress.num_calls(), 3);
     }
 
@@ -256,7 +260,7 @@ mod tests {
             let stopped =
                 mock!(Client::describe_tasks).then_output(move || described("STOPPED", exit_code));
             assert_eq!(
-                run(&[&started(), &stopped], None).await,
+                run(&[&started(), &stopped], Vec::new()).await,
                 Err("DB_TASK_FAILED")
             );
         }
@@ -269,6 +273,6 @@ mod tests {
                 .failures(Failure::builder().reason("RESOURCE:ENI").build())
                 .build()
         });
-        assert_eq!(run(&[&refused], None).await, Err("AWS_FAILED"));
+        assert_eq!(run(&[&refused], Vec::new()).await, Err("AWS_FAILED"));
     }
 }

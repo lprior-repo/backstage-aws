@@ -1,3 +1,6 @@
+# Everything this workflow knows is in three places: the settings file
+# `environments/preview.env`, the pull request number, and one CLI command.
+# Another CI system needs the same three things and nothing else.
 name: Preview environment
 on:
   pull_request:
@@ -16,7 +19,6 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: preview
     # A newer push waits for the running deployment: cancelling Terraform
     # mid-apply can leave the state locked.
     concurrency:
@@ -26,58 +28,52 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
-    env:
-      BACKSTAGE_AWS_NAMESPACE: pr-${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-backstage-aws
         with:
-          settings: ${{ toJSON(vars) }}
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+          environment: preview
       - uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100 # v4.3.1
         with:
-          role-to-assume: ${{ vars.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.BACKSTAGE_AWS_AWS_REGION }}
-          allowed-account-ids: ${{ vars.BACKSTAGE_AWS_AWS_ACCOUNT_ID }}
+          role-to-assume: ${{ env.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.BACKSTAGE_AWS_AWS_REGION }}
+          allowed-account-ids: ${{ env.BACKSTAGE_AWS_AWS_ACCOUNT_ID }}
           role-session-name: backstage-preview-${{ github.run_id }}
-      - name: Create preview and comment URL and timings
+      # Builds, deploys, waits until the environment answers, then writes its
+      # address on the pull request.
+      - run: backstage-aws env up --approve
         env:
-          GH_TOKEN: ${{ github.token }}
-          PULL_REQUEST: ${{ github.event.pull_request.number }}
-        run: |
-          set -o pipefail
-          # The result, or the error that explains a failure, stays in the log.
-          backstage-aws env up --approve | tee result.json
-          jq -r '"Preview: " + .result.url + "\n\n| Step | Status | Duration (ms) |\n| --- | --- | ---: |\n" + (.result.timings | map("| " + .name + " | " + .status + " | " + (.elapsed_ms | tostring) + " |") | join("\n"))' result.json > comment.md
-          gh pr comment "$PULL_REQUEST" --body-file comment.md
+          BACKSTAGE_AWS_PULL_REQUEST: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
   down:
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: preview
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
-    env:
-      BACKSTAGE_AWS_NAMESPACE: pr-${{ github.event.pull_request.number }}
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-backstage-aws
         with:
-          settings: ${{ toJSON(vars) }}
+          environment: preview
       - uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100 # v4.3.1
         with:
-          role-to-assume: ${{ vars.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.BACKSTAGE_AWS_AWS_REGION }}
-          allowed-account-ids: ${{ vars.BACKSTAGE_AWS_AWS_ACCOUNT_ID }}
+          role-to-assume: ${{ env.BACKSTAGE_AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.BACKSTAGE_AWS_AWS_REGION }}
+          allowed-account-ids: ${{ env.BACKSTAGE_AWS_AWS_ACCOUNT_ID }}
           role-session-name: backstage-preview-cleanup-${{ github.run_id }}
       - run: backstage-aws env down --approve
+        env:
+          BACKSTAGE_AWS_PULL_REQUEST: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}

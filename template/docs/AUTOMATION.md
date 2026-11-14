@@ -1,11 +1,29 @@
 # Automated workflows
 
-`preview.yml` handles same-repository pull requests. On open or update it assumes the `preview` GitHub environment's deploy role through OIDC and calls `backstage-aws env up --approve` for namespace `pr-<number>`, then comments the URL and the timing table; the CLI's JSON result, or the error that explains a failure, is in the job log. On close it calls `backstage-aws env down --approve`. Teardown is triggered by `pull_request_target`, because GitHub starts no `pull_request` run for a pull request that has a merge conflict; that job checks out the base branch and never runs code from the pull request. Runs for one pull request are serialized and never cancelled, because cancelling Terraform during an apply can leave the state locked; when pushes arrive faster than deployments finish, GitHub keeps only the newest waiting run.
+Settings live in committed `environments/preview.env` and, once provisioned, `environments/production.env`. The setup action loads their `BACKSTAGE_AWS_*` lines, installs Terraform 1.17.2, and downloads/verifies the matching CLI release. The CLI reads env/flags, not these files directly. Never place secret values in settings files.
 
-`deploy.yml` handles pushes to `main` and manual dispatch. It uses the `production` GitHub environment and calls `backstage-aws env up --scan --approve`. An optional manual image digest deploys an image that is already in the registry instead of building one. Until `backstage-aws bootstrap --environment production --approve` has published that environment's variables, the workflow prints a notice and does nothing.
+## Preview
 
-`validate.yml` runs `backstage-aws check`, which needs no settings and no credentials, and the Backstage app's immutable dependency install, typecheck, tests, and backend build from `app/`. Typecheck and tests run here, not during the image build.
+`preview.yml` handles same-repository PR opens, updates, and reopens. It checks out the PR merge revision, loads preview settings, configures Buildx, assumes the preview deploy role using GitHub OIDC, and calls:
 
-The workflows take their settings from the GitHub environment variables that `bootstrap` publishes: the project name, account, region, domain, hosted zone, repository, owner ID, environment, auth mode, desired count, scan limits, ingress CIDRs, plugin secret names, and the deploy role. The `setup-backstage-aws` action exports every `BACKSTAGE_AWS_*` variable of the job's environment, so a newly published setting needs no workflow change. The namespace is set by each workflow, and the state bucket's name follows from the project name, account, and region. Actions are pinned to full commit SHAs. The CLI release is verified with GitHub artifact attestations before use; Terraform is pinned to 1.17.2 with its wrapper disabled, and the CLI refuses any other version.
+```sh
+backstage-aws env up --approve
+```
 
-Every mutating CLI call passes `--approve` explicitly. Production can additionally require an environment reviewer, which `bootstrap` configures for the `production` environment.
+`BACKSTAGE_AWS_PULL_REQUEST` supplies the PR number; `GITHUB_TOKEN` permits the CLI to create/update the comment. Fork PRs are excluded. The CLI builds/pushes while cloning the seed database, applies the namespace stack, waits for ECS/ALB readiness, then posts the URL and returns JSON.
+
+Close events use `pull_request_target` and trusted base-branch code to call `env down`. They have PR-write permission so the CLI can update the comment. Deploy and teardown share a per-PR concurrency group and do not cancel active applies. GitHub may replace older pending runs.
+
+## Production
+
+`deploy.yml` runs on `main` or manual dispatch. It skips until `environments/production.env` is committed. Provision production and its OAuth secret in a separate AWS account before committing that file.
+
+It configures Buildx, signs in through GitHub OIDC, and calls `backstage-aws env up --scan --approve`. A manual image digest skips building. Protect `main` and review workflow/settings changes; there is no GitHub deployment Environment or separate deployment approval.
+
+## Identity and validation
+
+Preview OIDC trust accepts the configured repository's subjects; production accepts only its `ref:refs/heads/main` subject. Both require `aud=sts.amazonaws.com`. No static AWS keys or GitHub environment variables are needed.
+
+`validate.yml` runs offline Terraform checks and the app's immutable install, typecheck, tests and backend build. It needs no AWS deployment credentials. Offline success does not prove an AWS rollout or application behavior.
+
+For another CI system, install the same CLI/Terraform/Buildx, load settings, supply your own short-lived AWS identity, serialize mutations, and call the same commands. GitHub comments remain a GitHub-specific CLI feature; other providers can consume the JSON result. [Other CI guide](https://github.com/lprior-repo/backstage-aws/blob/main/docs/guides/other-ci.md).

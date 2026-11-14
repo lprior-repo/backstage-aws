@@ -255,6 +255,8 @@ async fn a_deployment_clones_applies_then_waits_for_the_rollout_and_a_healthy_ta
     let result = result?;
     assert_eq!(result.url, "https://pr-38.preview.example.com");
     assert_eq!(result.image_digest, DIGEST);
+    // No pull request is configured, so GitHub is never contacted.
+    assert_eq!(result.comment_url, None);
     let steps: Vec<_> = result
         .timings
         .iter()
@@ -272,6 +274,7 @@ async fn a_deployment_clones_applies_then_waits_for_the_rollout_and_a_healthy_ta
     let vars: Value = serde_json::from_slice(&vars)?;
     assert_eq!(vars.get("image_digest"), Some(&Value::from(DIGEST)));
     assert_eq!(vars.get("database_name"), Some(&Value::from("pr_38")));
+    assert_eq!(vars.get("spot"), Some(&Value::from(true)));
     let bucket = Value::from("portal-123456789012-us-east-1-tfstate");
     assert_eq!(vars.get("state_bucket_name"), Some(&bucket));
     Ok(())

@@ -67,7 +67,7 @@ resource "aws_ecs_task_definition" "env" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "1024"
-  memory                   = "4096"
+  memory                   = "2048"
   execution_role_arn       = local.base.application_execution_role_arn
   task_role_arn            = local.base.application_task_role_arn
   runtime_platform {
@@ -104,11 +104,14 @@ resource "aws_ecs_task_definition" "env" {
 }
 
 resource "aws_ecs_service" "env" {
-  name                               = "${var.name}-${var.namespace}"
-  cluster                            = local.base.ecs_cluster_arn
-  task_definition                    = aws_ecs_task_definition.env.arn
-  desired_count                      = var.desired_count
-  launch_type                        = "FARGATE"
+  name            = "${var.name}-${var.namespace}"
+  cluster         = local.base.ecs_cluster_arn
+  task_definition = aws_ecs_task_definition.env.arn
+  desired_count   = var.desired_count
+  capacity_provider_strategy {
+    capacity_provider = var.spot ? "FARGATE_SPOT" : "FARGATE"
+    weight            = 1
+  }
   platform_version                   = "LATEST"
   enable_execute_command             = false
   health_check_grace_period_seconds  = 60
@@ -122,7 +125,7 @@ resource "aws_ecs_service" "env" {
   network_configuration {
     subnets          = local.base.application_subnet_ids
     security_groups  = [local.base.portal_security_group_id]
-    assign_public_ip = false
+    assign_public_ip = local.base.assign_public_ip
   }
   load_balancer {
     target_group_arn = aws_lb_target_group.env.arn

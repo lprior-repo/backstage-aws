@@ -3,13 +3,14 @@ use crate::{
     ctx::{Ctx, StepTiming, poll, step, write_summary},
     db,
     error::{Error, Result},
+    github,
     terraform::{self, Stack, output_str},
 };
 use aws_sdk_ecs::types::{DeploymentRolloutState, Service};
 use aws_sdk_elasticloadbalancingv2::types::TargetHealthStateEnum;
 use serde::Serialize;
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// Fifteen minutes of polling for a rollout, five for target health.
@@ -25,11 +26,14 @@ pub(crate) struct EnvUpResult {
     url: String,
     image_digest: String,
     timings: Vec<StepTiming>,
+    /// The pull-request comment announcing the environment, when one was written.
+    comment_url: Option<String>,
 }
 #[derive(Serialize)]
 pub(crate) struct EnvDownResult {
     namespace: String,
     destroyed: bool,
+    comment_url: Option<String>,
 }
 #[derive(Serialize)]
 pub(crate) struct EnvListResult {
@@ -47,6 +51,7 @@ pub(crate) struct EnvStatusResult {
 
 pub(crate) async fn env_up(ctx: &Ctx, digest: Option<&str>, scan: bool) -> Result<EnvUpResult> {
     ctx.require_approval()?;
+    let started = Instant::now();
     let mut timings = Vec::new();
     // The image and the database do not depend on each other, so the build
     // and the clone task run at the same time.
@@ -72,9 +77,20 @@ pub(crate) async fn env_up(ctx: &Ctx, digest: Option<&str>, scan: bool) -> Resul
     timings.push(step("ecs.rollout", wait_rollout(ctx, &outputs)).await?.1);
     timings.push(step("alb.healthy", wait_healthy(ctx, &outputs)).await?.1);
     write_summary(&timings)?;
+    let url = output_str(&outputs, "url")?.to_owned();
+    let seconds = started.elapsed().as_secs();
+    let text = format!(
+        "### Your on-demand environment is ready\n\n**{url}**\n\n\
+         | | |\n|---|---|\n| Namespace | `{}` |\n| Image | `{image}` |\n| Ready in | {} min {} s |\n\n\
+         Every push to this pull request redeploys it. Closing the pull request removes it.",
+        ctx.settings.namespace,
+        seconds / 60,
+        seconds % 60,
+    );
     Ok(EnvUpResult {
+        comment_url: github::comment(ctx, &text).await?,
         namespace: ctx.settings.namespace.clone(),
-        url: output_str(&outputs, "url")?.to_owned(),
+        url,
         image_digest: image,
         timings,
     })
@@ -99,8 +115,13 @@ pub(crate) async fn env_down(ctx: &Ctx) -> Result<EnvDownResult> {
         .send()
         .await
         .map_err(|error| Error::aws_failed("s3", "DeleteObject", error.to_string()))?;
+    let namespace = ctx.settings.namespace.clone();
+    let text = format!(
+        "### On-demand environment removed\n\n`{namespace}`, its database, and its Terraform state are deleted."
+    );
     Ok(EnvDownResult {
-        namespace: ctx.settings.namespace.clone(),
+        comment_url: github::comment(ctx, &text).await?,
+        namespace,
         destroyed: state.is_some(),
     })
 }

@@ -2,41 +2,23 @@ mock_provider "aws" {
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
   mock_data "aws_partition" { defaults = { partition = "aws" } }
 }
-mock_provider "github" {}
 
 variables {
-  aws_account_id           = "123456789012"
-  aws_region               = "us-east-1"
-  name                     = "backstage"
-  github_repository        = "example/backstage"
-  github_environment       = "preview"
-  github_actions_variables = { BACKSTAGE_AWS_NAME = "backstage" }
+  aws_account_id    = "123456789012"
+  aws_region        = "us-east-1"
+  name              = "backstage"
+  github_repository = "example/backstage"
+  environment       = "preview"
 }
 
-run "one_preview_environment_and_scoped_variables" {
+run "preview_role_trusts_the_repository_and_nothing_wider" {
   command = apply
   assert {
-    condition     = github_repository_environment.deploy[0].environment == "preview"
-    error_message = "Exactly the configured environment is created."
-  }
-  assert {
-    condition     = length(github_repository_environment_deployment_policy.deploy) == 0 && length(github_repository_environment.deploy[0].reviewers) == 0
-    error_message = "Preview has no production-only reviewer or branch policy."
-  }
-  assert {
-    condition     = toset(keys(github_actions_environment_variable.settings)) == toset(["BACKSTAGE_AWS_NAME", "BACKSTAGE_AWS_DEPLOY_ROLE_ARN"])
-    error_message = "User and computed variables are complete and environment-scoped."
-  }
-  assert {
-    condition     = github_actions_environment_variable.settings["BACKSTAGE_AWS_NAME"].environment == "preview"
-    error_message = "Actions variables must be scoped to the deployment environment."
-  }
-  assert {
-    condition = jsondecode(aws_iam_role.github_deploy[0].assume_role_policy).Statement[0].Condition.StringEquals == {
-      "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-      "token.actions.githubusercontent.com:sub" = "repo:example/backstage:environment:preview"
+    condition = jsondecode(aws_iam_role.github_deploy[0].assume_role_policy).Statement[0].Condition == {
+      StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
+      StringLike   = { "token.actions.githubusercontent.com:sub" = "repo:example/backstage:*" }
     }
-    error_message = "OIDC trust must use exact audience and subject StringEquals conditions."
+    error_message = "The preview role must accept this repository's runs only, with the STS audience."
   }
   assert {
     condition = (
@@ -102,14 +84,16 @@ run "one_preview_environment_and_scoped_variables" {
   }
 }
 
-run "production_requires_reviewer_and_main_policy" {
+run "production_role_trusts_the_main_branch_only" {
   command = apply
   variables {
-    github_environment = "production"
-    owner_github_id    = "123456789"
+    environment = "production"
   }
   assert {
-    condition     = contains(github_repository_environment.deploy[0].reviewers[0].users, 123456789) && github_repository_environment_deployment_policy.deploy[0].branch_pattern == "main"
-    error_message = "Production requires owner review and main-only deployments."
+    condition = jsondecode(aws_iam_role.github_deploy[0].assume_role_policy).Statement[0].Condition == {
+      StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
+      StringLike   = { "token.actions.githubusercontent.com:sub" = "repo:example/backstage:ref:refs/heads/main" }
+    }
+    error_message = "A pull request must never be able to assume the production role."
   }
 }

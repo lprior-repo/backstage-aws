@@ -13,7 +13,7 @@ variable "budget_email" {
 }
 variable "monthly_budget_usd" {
   type    = number
-  default = 300
+  default = 100
   validation {
     condition     = var.monthly_budget_usd >= 1 && var.monthly_budget_usd <= 100000
     error_message = "Monthly budget must be between 1 and 100000 USD."

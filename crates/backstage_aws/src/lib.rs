@@ -55,11 +55,11 @@ fn output_failure(command: &str, error: &Error) -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<serde_json::Value> {
-    if matches!(cli.command, cli::Command::Check) {
+    if let cli::Command::Check { app } = &cli.command {
         // Offline: needs neither deployment settings nor credentials.
         let terraform = cli.settings.terraform_path();
         terraform::verify_version(&terraform).await?;
-        let checked = check::check(&cli.settings.project, &terraform).await?;
+        let checked = check::check(&cli.settings.project, &terraform, *app).await?;
         return serde_json::to_value(checked)
             .map_err(|error| Error::state_failed(error.to_string()));
     }

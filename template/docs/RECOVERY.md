@@ -1,17 +1,29 @@
 # Recovery and teardown
 
-The CLI emits one JSON document on stdout, NDJSON progress and child output on stderr, and exit codes 0 (success), 2 (invalid input), 3 (blocked/precondition/approval), 4 (external failure), and 5 (remote work continues after timeout). A timeout is not proof that remote work stopped; inspect the reported operation and AWS resource state before retrying.
+The CLI returns one JSON document and a nonzero exit on failure. Progress and raw child logs use stderr. Exit 5 means remote polling timed out, not that work stopped. A child-process timeout is exit 4; Terraform may leave a lock behind.
 
-Terraform, Docker, or Git that exceeds its time limit is stopped and reported as a tool failure (exit 4), as is a job that GitHub cancels or times out. Terraform stopped this way can leave its lock behind, and the next run for that stack then fails with a lock error. Once you are sure no other run is active, delete the lock object, `<state key>.tflock` in the state bucket `<name>-<account>-<region>-tfstate` (for a preview, `env/pr-<number>.tfstate.tflock`), and run the command again.
+## Interrupted provisioning
 
-`bootstrap` decides from the account, not from the checkout, whether it has run before: until the state bucket exists it applies with state in `infra/bootstrap/terraform.tfstate`, then moves that file into the bucket. If it fails part-way, run it again; it continues from the state on disk. It refuses state on disk that belongs to another account.
+Bootstrap starts with `infra/bootstrap/terraform.tfstate` and migrates it to the encrypted S3 bucket `<name>-<account>-<region>-tfstate`. Preserve local state after a partial bootstrap; retry with the same account/settings. It refuses local state for another account. Never delete state to bypass an error.
 
-Every mutation requires `--approve` or `BACKSTAGE_AWS_APPROVE=true`. `env down --approve` is strictly ordered: destroy the namespace Terraform stack if its state object exists, drop its database with `DROP DATABASE IF EXISTS ... WITH (FORCE)`, then delete its state object. A failure stops later actions, and every step is safe to repeat, so finish an interrupted teardown by running the command again. Do not manually delete state to bypass a failed destroy or database drop.
+Never clear a lock while another writer might still be active. After confirming no local or CI process is using that exact state, an operator can remove its `<state-key>.tflock` object and retry. Prefer a reviewed recovery operation; do not automate lock deletion on failure.
 
-`env up` fails when ECS rolls a deployment back or the load balancer never reports a healthy target. The previous version, if there was one, keeps serving. Read the service events and the task logs in the namespace's log group, fix the cause, and run it again.
+## Namespace removal
 
-For an application-password change, run `backstage-aws db rotate-password --approve`. It stages a new password in Secrets Manager as `AWSPENDING`, sets it on the shared application role through a db-admin task, makes it `AWSCURRENT`, and restarts every environment service in the account. A failure before the last step leaves the role and the current secret unchanged; after any failure, run the command again. Expect brief connection errors during service restarts. Preview and production accounts are separate; namespaces in one account share that account's application role.
+`env down --approve` destroys the namespace stack, drops its database with active sessions disconnected, and deletes the current state object. It stops on failure; repeat to finish an interrupted removal. Versioned state can remain recoverable, but restoring state does not restore a dropped database.
 
-The database keeps seven days of automated backups with point-in-time restore, and a final snapshot when the instance is deleted. The CLI has no restore command; restore with RDS to a new instance. The registry keeps the 200 most recent images.
+Shared base/bootstrap resources are not removed by the CLI. Before decommissioning, stop CI, export needed data, preserve keys/state, and deliberately handle ALB/RDS deletion protection, final snapshots, nonempty buckets and `prevent_destroy`.
 
-Terraform state and saved plans are sensitive. Preserve the account's encrypted state bucket and KMS key while any stack or retained resource depends on them. Never run competing writers against the same stack state.
+## Database and image recovery
+
+RDS has seven-day automated backups/PITR, deletion protection and a final-snapshot setting. `db dump --approve` exports the selected namespace into the encrypted versioned seed bucket; `--file` also downloads it to a new owner-readable file. No scheduler is configured. Current dumps persist; replaced/deleted versions expire after 30 days.
+
+`seed --file DUMP --approve` restores only the template for future namespaces, not an existing namespace. Full namespace/PITR restoration and endpoint cutover require an explicit operator recovery procedure. Preserve both KMS keys; retained ciphertext is unusable if its key is destroyed.
+
+ECR retains fifty recent images, not every deployed release forever. Preserve release images separately if rebuilding from source is insufficient.
+
+## Password rotation
+
+`db rotate-password --approve` stages `AWSPENDING`, alters the PostgreSQL role, promotes `AWSCURRENT`, then restarts services. Failures may leave the database changed before promotion/restarts complete. Inspect the failed step and rerun; expect brief connection errors. Do not assume the old credential remains valid after every failure.
+
+Full [backup and restore procedures](https://github.com/lprior-repo/backstage-aws/blob/main/docs/guides/backup-and-restore.md). No AWS restore or teardown has been live-verified.

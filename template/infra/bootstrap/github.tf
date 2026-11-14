@@ -7,11 +7,12 @@ variable "github_repository" {
   }
 }
 
-variable "github_environment" {
-  type    = string
-  default = "preview"
+variable "environment" {
+  type        = string
+  default     = "preview"
+  description = "`production` accepts workflow runs on the main branch only; any other value accepts every run in the repository."
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,19}$", var.github_environment))
+    condition     = can(regex("^[a-z][a-z0-9-]{1,19}$", var.environment))
     error_message = "Use a 2-20 character lowercase environment name."
   }
 }
@@ -48,10 +49,16 @@ resource "aws_iam_role" "github_deploy" {
       Effect    = "Allow"
       Action    = "sts:AssumeRoleWithWebIdentity"
       Principal = { Federated = local.github_provider_arn }
-      Condition = { StringEquals = {
-        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${var.github_environment}"
-      } }
+      # GitHub's token names the repository and what triggered the run: a pull
+      # request is `repo:<owner>/<repo>:pull_request`, a push to main is
+      # `repo:<owner>/<repo>:ref:refs/heads/main`. Production must never be
+      # reachable from a pull request.
+      Condition = {
+        StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:${var.environment == "production" ? "ref:refs/heads/main" : "*"}"
+        }
+      }
     }]
   })
 }
@@ -150,62 +157,3 @@ resource "aws_iam_role_policy" "github_deploy" {
 }
 
 output "github_deploy_role_arn" { value = try(aws_iam_role.github_deploy[0].arn, null) }
-
-variable "owner_github_id" {
-  type    = string
-  default = null
-  validation {
-    condition     = var.owner_github_id == null || can(regex("^[1-9][0-9]{0,15}$", var.owner_github_id))
-    error_message = "Supply a positive numeric GitHub user ID with at most 16 digits."
-  }
-}
-
-variable "github_actions_variables" {
-  type    = map(string)
-  default = {}
-  validation {
-    condition = alltrue([for key in keys(var.github_actions_variables) :
-      can(regex("^BACKSTAGE_AWS_[A-Z0-9_]+$", key)) &&
-      key != "BACKSTAGE_AWS_DEPLOY_ROLE_ARN"
-    ])
-    error_message = "Use BACKSTAGE_AWS_* keys except the bootstrap-computed BACKSTAGE_AWS_DEPLOY_ROLE_ARN."
-  }
-}
-
-resource "github_repository_environment" "deploy" {
-  count       = var.github_repository == null ? 0 : 1
-  repository  = split("/", var.github_repository)[1]
-  environment = var.github_environment
-  dynamic "reviewers" {
-    for_each = var.github_environment == "production" ? [1] : []
-    content { users = [tonumber(var.owner_github_id)] }
-  }
-  dynamic "deployment_branch_policy" {
-    for_each = var.github_environment == "production" ? [1] : []
-    content {
-      protected_branches     = false
-      custom_branch_policies = true
-    }
-  }
-}
-
-resource "github_repository_environment_deployment_policy" "deploy" {
-  count          = var.github_repository != null && var.github_environment == "production" ? 1 : 0
-  repository     = split("/", var.github_repository)[1]
-  environment    = github_repository_environment.deploy[0].environment
-  branch_pattern = "main"
-}
-
-locals {
-  computed_action_variables = {
-    BACKSTAGE_AWS_DEPLOY_ROLE_ARN = try(aws_iam_role.github_deploy[0].arn, "")
-  }
-}
-
-resource "github_actions_environment_variable" "settings" {
-  for_each      = var.github_repository == null ? {} : merge(var.github_actions_variables, local.computed_action_variables)
-  repository    = split("/", var.github_repository)[1]
-  environment   = github_repository_environment.deploy[0].environment
-  variable_name = each.key
-  value         = each.value
-}

@@ -15,9 +15,31 @@ pub(crate) async fn run<S: AsRef<OsStr> + Sync>(
     limit: Duration,
 ) -> Result<()> {
     let stdout = Stdio::from(std::io::stderr());
-    finish(program, args, cwd, input, limit, stdout)
+    finish(program, args, cwd, input, limit, stdout, &[])
         .await
         .map(drop)
+}
+
+/// Runs a child with additional environment values and streams stdout to stderr.
+pub(crate) async fn run_with_env<S: AsRef<OsStr> + Sync>(
+    program: &OsStr,
+    args: &[S],
+    cwd: &Path,
+    input: Option<&[u8]>,
+    limit: Duration,
+    env: &[(&str, &str)],
+) -> Result<()> {
+    finish(
+        program,
+        args,
+        cwd,
+        input,
+        limit,
+        Stdio::from(std::io::stderr()),
+        env,
+    )
+    .await
+    .map(drop)
 }
 
 /// Runs a child to completion and returns its stdout.
@@ -27,7 +49,7 @@ pub(crate) async fn capture<S: AsRef<OsStr> + Sync>(
     cwd: &Path,
     limit: Duration,
 ) -> Result<Vec<u8>> {
-    finish(program, args, cwd, None, limit, Stdio::piped()).await
+    finish(program, args, cwd, None, limit, Stdio::piped(), &[]).await
 }
 
 async fn finish<S: AsRef<OsStr> + Sync>(
@@ -37,13 +59,16 @@ async fn finish<S: AsRef<OsStr> + Sync>(
     input: Option<&[u8]>,
     limit: Duration,
     stdout: Stdio,
+    env: &[(&str, &str)],
 ) -> Result<Vec<u8>> {
     let name = program.to_string_lossy().into_owned();
     let failed = |detail: String| Error::tool_failed(name.clone(), detail);
-    let mut child = Command::new(program)
+    let mut child_command = Command::new(program);
+    child_command
         .args(args)
         .current_dir(cwd)
         .env("TF_IN_AUTOMATION", "1")
+        .envs(env.iter().copied())
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -51,7 +76,8 @@ async fn finish<S: AsRef<OsStr> + Sync>(
         })
         .stdout(stdout)
         .stderr(Stdio::inherit())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    let mut child = child_command
         .spawn()
         .map_err(|error| failed(error.to_string()))?;
     if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {

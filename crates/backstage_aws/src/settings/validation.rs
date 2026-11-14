@@ -36,16 +36,12 @@ fn valid_domain(value: &str) -> bool {
 }
 
 fn validate_derived_names(settings: &Settings) -> Result<(String, String, String)> {
-    let namespace = settings.namespace.as_deref().map_or_else(
-        || {
-            if settings.environment == "production" {
-                "production".to_owned()
-            } else {
-                settings.environment.clone()
-            }
-        },
-        str::to_owned,
-    );
+    // An explicit namespace wins, then the pull request, then the environment.
+    let namespace = match (settings.namespace.as_deref(), settings.pull_request) {
+        (Some(namespace), _) => namespace.to_owned(),
+        (None, Some(number)) => format!("pr-{number}"),
+        (None, None) => settings.environment.clone(),
+    };
     require(&namespace, r"^[a-z][a-z0-9-]{0,30}$", "namespace")?;
     // Names of system databases and of the base stack's log groups and task families.
     let reserved = [
@@ -155,13 +151,7 @@ impl Settings {
             }
         }
         validate_cidrs(&self.allowed_ingress_cidrs)?;
-        if !(1..=100_000).contains(&self.monthly_budget_usd)
-            || !(1..=4).contains(&self.desired_count)
-        {
-            return Err(Error::invalid_input(
-                "budget or desired count is out of range",
-            ));
-        }
+        self.validate_sizes()?;
         let (namespace, hostname, auth_mode) = validate_derived_names(self)?;
         let plugin_secrets = self
             .plugin_secrets
@@ -191,6 +181,23 @@ impl Settings {
             auth_mode,
             plugin_secrets,
         })
+    }
+}
+impl Settings {
+    fn validate_sizes(&self) -> Result<()> {
+        if !(1..=100_000).contains(&self.monthly_budget_usd)
+            || !(1..=4).contains(&self.desired_count)
+            || self.network.nat_gateways > 2
+        {
+            return Err(Error::invalid_input(
+                "budget, desired count, or NAT gateway count is out of range",
+            ));
+        }
+        require(
+            &self.network.database_instance_class,
+            r"^db\.[a-z0-9]+\.[a-z0-9]+$",
+            "database instance class",
+        )
     }
 }
 

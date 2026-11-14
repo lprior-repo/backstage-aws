@@ -9,9 +9,9 @@ concurrency:
   group: validate-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  cli:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -19,19 +19,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-backstage-aws
-      - run: backstage-aws check
-  application:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      NODE_OPTIONS: --no-node-snapshot --max-old-space-size=4096
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
@@ -41,9 +28,4 @@ jobs:
           key: ${{ runner.os }}-v24.22.1-node_modules-${{ hashFiles('app/yarn.lock', 'app/**/package.json') }}
       - name: Install native build prerequisites
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++ pkg-config libsecret-1-dev
-      - run: yarn install --immutable
-      - name: Typecheck, test, and build backend
-        run: |
-          yarn tsc
-          yarn test --watch=false --runInBand
-          yarn build:backend
+      - run: backstage-aws check --app

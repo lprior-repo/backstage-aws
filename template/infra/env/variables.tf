@@ -63,6 +63,12 @@ variable "desired_count" {
   }
 }
 
+variable "spot" {
+  type        = bool
+  default     = false
+  description = "Run on Fargate Spot: about a third of the price, and AWS may replace a task at two minutes' notice."
+}
+
 variable "auth_mode" {
   type    = string
   default = "guest"

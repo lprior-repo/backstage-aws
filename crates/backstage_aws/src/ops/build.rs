@@ -34,6 +34,7 @@ pub(crate) async fn build(ctx: &Ctx, tag: Option<&str>) -> Result<BuildResult> {
         ));
     }
     let app = ctx.project_dir.join("app");
+    ensure_builder(&app).await?;
     login(ctx, &repository).await?;
     // ECR needs OCI image manifests for the cache, and a plain image manifest
     // (no provenance index) so the pushed digest can be scanned and deployed.
@@ -41,6 +42,7 @@ pub(crate) async fn build(ctx: &Ctx, tag: Option<&str>) -> Result<BuildResult> {
     let args = [
         "buildx",
         "build",
+        "--builder=backstage-aws",
         "--platform=linux/amd64",
         "--file=packages/backend/Dockerfile",
         "--provenance=false",
@@ -78,6 +80,61 @@ pub(crate) async fn build(ctx: &Ctx, tag: Option<&str>) -> Result<BuildResult> {
         image_tag,
         repository,
     })
+}
+const BUILDER_NAME: &str = "backstage-aws";
+
+async fn ensure_builder(app: &std::path::Path) -> Result<()> {
+    let names = process::capture(
+        OsStr::new("docker"),
+        &["buildx", "ls", "--format", "{{.Name}}"],
+        app,
+        Duration::from_secs(30),
+    )
+    .await?;
+    let names = String::from_utf8(names)
+        .map_err(|error| Error::tool_failed("docker", error.to_string()))?;
+    if !names.lines().any(|name| name.trim() == BUILDER_NAME) {
+        process::run(
+            OsStr::new("docker"),
+            &[
+                "buildx",
+                "create",
+                "--name",
+                BUILDER_NAME,
+                "--driver",
+                "docker-container",
+            ],
+            app,
+            None,
+            Duration::from_secs(30),
+        )
+        .await?;
+    }
+    let inspection = process::capture(
+        OsStr::new("docker"),
+        &[
+            "buildx",
+            "inspect",
+            "--builder",
+            BUILDER_NAME,
+            "--bootstrap",
+        ],
+        app,
+        Duration::from_secs(120),
+    )
+    .await?;
+    let inspection = String::from_utf8(inspection)
+        .map_err(|error| Error::tool_failed("docker", error.to_string()))?;
+    if !inspection
+        .lines()
+        .any(|line| line.trim() == "Driver: docker-container")
+    {
+        return Err(Error::tool_failed(
+            "docker",
+            format!("builder {BUILDER_NAME} is not a docker-container builder"),
+        ));
+    }
+    Ok(())
 }
 
 /// Logs Docker in to the registry. The password travels on stdin only.

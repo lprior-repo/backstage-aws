@@ -95,13 +95,17 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+# NAT gateways are optional because they cost more than the rest of a small
+# deployment. Without one, the application subnets route to the internet
+# gateway and each task gets a public address; the task security groups still
+# admit nothing but the load balancer.
 resource "aws_eip" "nat" {
-  count  = var.single_nat_gateway ? 1 : 2
+  count  = var.nat_gateways
   domain = "vpc"
 }
 
 resource "aws_nat_gateway" "main" {
-  count         = var.single_nat_gateway ? 1 : 2
+  count         = var.nat_gateways
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
   depends_on    = [aws_internet_gateway.main]
@@ -116,7 +120,8 @@ resource "aws_route" "application" {
   count                  = 2
   route_table_id         = aws_route_table.application[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.main[var.single_nat_gateway ? 0 : count.index].id
+  gateway_id             = var.nat_gateways == 0 ? aws_internet_gateway.main.id : null
+  nat_gateway_id         = var.nat_gateways == 0 ? null : aws_nat_gateway.main[count.index % var.nat_gateways].id
 }
 
 resource "aws_route_table_association" "application" {
@@ -317,10 +322,17 @@ resource "aws_route53_record" "wildcard" {
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.name}-cluster"
+  # Container Insights bills per task and metric. The alarms in operations.tf
+  # use the standard RDS and load balancer metrics.
   setting {
     name  = "containerInsights"
-    value = "enabled"
+    value = "disabled"
   }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "main" {
+  cluster_name       = aws_ecs_cluster.main.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 }
 
 # Image tags never move, except the BuildKit layer cache, which every build
@@ -353,11 +365,11 @@ resource "aws_ecr_lifecycle_policy" "portal" {
       }, {
       # Every build pushes a uniquely tagged image; the newest ones are the ones in use.
       rulePriority = 2
-      description  = "Keep the 200 most recent images"
+      description  = "Keep the 50 most recent images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 200
+        countNumber = 50
       }
       action = { type = "expire" }
     }]
@@ -483,8 +495,9 @@ resource "aws_db_instance" "database" {
   identifier                    = "${var.name}-postgres"
   engine                        = "postgres"
   engine_version                = "16"
-  instance_class                = "db.t4g.small"
-  allocated_storage             = 50
+  instance_class                = var.database_instance_class
+  storage_type                  = "gp3"
+  allocated_storage             = 20
   max_allocated_storage         = 100
   username                      = "backstage_admin"
   manage_master_user_password   = true

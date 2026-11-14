@@ -3,8 +3,8 @@
 use crate::{
     ctx::Ctx,
     db,
-    error::Result,
-    github,
+    error::{Error, Result},
+    template,
     terraform::{self, Stack},
 };
 use serde::Serialize;
@@ -13,9 +13,11 @@ use std::path::Path;
 
 #[derive(Serialize)]
 pub(crate) struct BootstrapResult {
-    repository_created: bool,
     /// True on the first run in an account, when local state moved to S3.
     state_migrated: bool,
+    /// The committed record of this environment's settings, which CI loads.
+    settings_file: String,
+    deploy_role_arn: String,
 }
 
 #[derive(Serialize)]
@@ -23,17 +25,23 @@ pub(crate) struct BaseResult {
     outputs: Value,
 }
 
-/// The bootstrap stack manages the repository's GitHub environment, so the
-/// repository has to exist before Terraform runs.
 pub(crate) async fn bootstrap(ctx: &Ctx) -> Result<BootstrapResult> {
     ctx.require_approval()?;
+    let settings = &ctx.settings;
     Ok(BootstrapResult {
-        repository_created: github::ensure_repository(ctx).await?,
         state_migrated: terraform::bootstrap(ctx).await?,
+        settings_file: template::write_settings_file(settings, &ctx.project_dir)?,
+        deploy_role_arn: settings.deploy_role_arn(),
     })
 }
 
 pub(crate) async fn base(ctx: &Ctx) -> Result<BaseResult> {
+    ctx.require_approval()?;
+    if ctx.settings.settings.allowed_ingress_cidrs.is_empty() {
+        return Err(Error::invalid_input(
+            "set --allowed-ingress-cidrs: the load balancer admits only the IPv4 networks listed there",
+        ));
+    }
     terraform::apply(ctx, Stack::Base, &ctx.settings.base_tfvars()).await?;
     db::initialize_database(ctx).await?;
     Ok(BaseResult {

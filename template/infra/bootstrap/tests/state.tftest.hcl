@@ -6,7 +6,6 @@ mock_provider "aws" {
     defaults = { partition = "aws" }
   }
 }
-mock_provider "github" {}
 
 variables {
   aws_account_id = "123456789012"
@@ -51,18 +50,5 @@ run "new_account_baseline_is_explicit" {
   assert {
     condition     = aws_accessanalyzer_analyzer.account[0].type == "ACCOUNT"
     error_message = "Account-level IAM access analysis must be created."
-  }
-}
-
-run "production_review_and_policy_are_production_only" {
-  command = apply
-  variables {
-    github_repository  = "example/backstage"
-    github_environment = "production"
-    owner_github_id    = "123456789"
-  }
-  assert {
-    condition     = contains(github_repository_environment.deploy[0].reviewers[0].users, 123456789) && github_repository_environment_deployment_policy.deploy[0].branch_pattern == "main"
-    error_message = "Production requires the owner reviewer and a main-only deployment policy."
   }
 }

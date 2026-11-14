@@ -12,8 +12,8 @@ use std::path::PathBuf;
 #[command(
     name = "backstage-aws",
     version,
-    about = "AI-agent-first Backstage on AWS operator",
-    long_about = "Provision and operate Backstage on AWS Fargate with Terraform and GitHub Actions OIDC. All options accept BACKSTAGE_AWS_* environment fallbacks. No command prompts or reads a TTY. Every command writes exactly one JSON result envelope to stdout (only --help and --version print plain text); progress and child output go to stderr. Exit codes: 0 success, 2 invalid input, 3 blocked or approval required, 4 tool/API failure, 5 remote work continues after timeout."
+    about = "Backstage on AWS Fargate: shared infrastructure once, an environment per pull request",
+    long_about = "Runs Backstage on AWS Fargate with Terraform, and gives every pull request its own environment. Settings come from flags or BACKSTAGE_AWS_* environment variables; a project keeps them in environments/<environment>.env. No command prompts. Every command writes exactly one JSON document to stdout (only --help and --version print plain text); progress and child output go to stderr. Commands that change anything need --approve. Exit codes: 0 success, 2 invalid input, 3 blocked or approval required, 4 tool or API failure, 5 remote work continues after timeout."
 )]
 pub(crate) struct Cli {
     #[command(flatten)]
@@ -24,45 +24,59 @@ pub(crate) struct Cli {
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum Command {
     #[command(
-        about = "Render the embedded starter into a new directory.",
-        long_about = "Creates a new project from the embedded template. Requires --output DIR; the destination must not exist."
+        about = "Create a new project directory from the built-in template.",
+        long_about = "Creates a new project from the built-in template and writes its settings to environments/<environment>.env. Requires --output DIR; the destination must not exist."
     )]
     Init {
+        /// The directory to create.
         #[arg(long)]
         output: PathBuf,
     },
     #[command(
-        about = "Run offline Terraform format, initialization, validation, and tests for all stacks."
+        about = "Validate Terraform offline, optionally including the Backstage application. Needs no AWS credentials."
     )]
-    Check,
-    #[command(about = "Check local tools, AWS identity, and GitHub repository permissions.")]
+    Check {
+        /// Also install, typecheck, test, and build the Backstage application.
+        #[arg(long)]
+        app: bool,
+    },
+    #[command(about = "Check local tools, the AWS identity, and GitHub repository access.")]
     Doctor,
-    #[command(about = "Provision account bootstrap resources and migrate bootstrap state.")]
+    #[command(
+        about = "Prepare the AWS account: Terraform state, the CI deploy role, and the account baseline.",
+        long_about = "Requires --approve. Creates the encrypted state bucket, the role CI assumes through GitHub OIDC, and (unless --account-baseline false) CloudTrail, a password policy and the S3 public-access block. Rewrites environments/<environment>.env. Safe to repeat."
+    )]
     Bootstrap,
-    #[command(about = "Provision shared base infrastructure and initialize the database role.")]
+    #[command(
+        about = "Create the shared infrastructure: network, load balancer, database, registry, secrets.",
+        long_about = "Requires --approve and --allowed-ingress-cidrs. Everything environments share is created here once per account. Safe to repeat; rerun it after changing a setting."
+    )]
     Base,
-    #[command(about = "Upload and restore a custom-format PostgreSQL seed dump.")]
+    #[command(about = "Load a database dump as the template every new environment is copied from.")]
     Seed {
+        /// A custom-format dump: `pg_dump --format=custom`, or the output of `db dump --file`.
         #[arg(long)]
         file: PathBuf,
     },
-    #[command(about = "Build and push the portal image with registry cache.")]
+    #[command(about = "Build the portal image and push it to the registry.")]
     Build {
+        /// The image tag. Default: the namespace and the current time.
         #[arg(long)]
         tag: Option<String>,
     },
-    #[command(subcommand)]
+    #[command(subcommand, about = "Create, remove, list and inspect environments.")]
     Env(EnvCommand),
-    #[command(subcommand)]
+    #[command(subcommand, about = "Store secrets the portal reads.")]
     Secrets(SecretsCommand),
-    #[command(subcommand)]
+    #[command(subcommand, about = "Back up the database and rotate its password.")]
     Db(DbCommand),
-    #[command(about = "Create the GitHub repository if needed and publish the project to main.")]
+    #[command(about = "Create the GitHub repository if needed and push the project to main.")]
     Publish,
     #[command(
-        about = "Run doctor, bootstrap, base, optional seed and sign-in credentials, environment deployment, and publish in order."
+        about = "First install in one command: doctor, bootstrap, base, seed, sign-in, environment, publish."
     )]
     Up {
+        /// A database dump to load as the template for new environments.
         #[arg(long)]
         seed_file: Option<PathBuf>,
         /// GitHub sign-in credentials, stored once the base stack exists.
@@ -72,26 +86,36 @@ pub(crate) enum Command {
 }
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum EnvCommand {
-    #[command(about = "Clone the namespace database and deploy its Fargate service.")]
+    #[command(
+        about = "Deploy the namespace and wait until it answers.",
+        long_about = "Requires --approve. Builds the image (unless --digest names one), copies the template database for a new namespace, deploys, and returns once the load balancer reports a healthy target. With --pull-request and GITHUB_TOKEN it writes the environment's address on the pull request. Safe to repeat."
+    )]
     Up {
+        /// Deploy this existing image instead of building one.
         #[arg(long)]
         digest: Option<String>,
+        /// Refuse the image when its vulnerability scan exceeds the finding limits.
         #[arg(long)]
         scan: bool,
     },
     #[command(
-        about = "Destroy namespace resources, drop its database, and delete its state object."
+        about = "Remove the namespace: its service, its database, and its Terraform state.",
+        long_about = "Requires --approve. Safe to repeat: an interrupted removal is finished by running it again."
     )]
     Down,
-    #[command(about = "List namespaces with Terraform state in the state bucket.")]
+    #[command(about = "List the namespaces that exist in this account.")]
     List,
-    #[command(about = "Report namespace service, image, URL, and readiness.")]
+    #[command(about = "Report the namespace's address, image, and whether it is ready.")]
     Status,
 }
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum SecretsCommand {
-    #[command(about = "Set GitHub OAuth identity credentials from a private file or environment.")]
+    #[command(
+        about = "Store the GitHub OAuth app credentials used for sign-in.",
+        long_about = "Requires --approve. Reads clientId and clientSecret from --file (JSON), or from BACKSTAGE_AWS_OAUTH_CLIENT_ID and BACKSTAGE_AWS_OAUTH_CLIENT_SECRET. The values are never printed."
+    )]
     SetIdentity {
+        /// A JSON file: {"clientId": "...", "clientSecret": "..."}.
         #[arg(long)]
         file: Option<PathBuf>,
     },
@@ -99,10 +123,18 @@ pub(crate) enum SecretsCommand {
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum DbCommand {
     #[command(
-        about = "Generate and apply a new PostgreSQL application-role password, then restart services.",
+        about = "Replace the database password the portal uses, then restart every environment.",
         long_about = "Requires --approve. The random password is handled only in Secrets Manager API bodies and is never printed, logged, or passed as an argument."
     )]
     RotatePassword,
+    #[command(
+        about = "Dump the namespace's database to the seed bucket, and optionally download it.",
+        long_about = "Requires --approve. Runs pg_dump inside the VPC and stores the custom-format dump under backups/<namespace>/ in the seed bucket. --file also downloads it to a new file that only its owner can read; an existing file is never overwritten. `seed --file` restores such a dump as the template for new environments."
+    )]
+    Dump {
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
 }
 fn value<T: Serialize>(result: T) -> Result<Value> {
     serde_json::to_value(result).map_err(|error| Error::state_failed(error.to_string()))
@@ -110,7 +142,7 @@ fn value<T: Serialize>(result: T) -> Result<Value> {
 pub(crate) const fn command_name(command: &Command) -> &'static str {
     match command {
         Command::Init { .. } => "init",
-        Command::Check => "check",
+        Command::Check { .. } => "check",
         Command::Doctor => "doctor",
         Command::Bootstrap => "bootstrap",
         Command::Base => "base",
@@ -122,6 +154,7 @@ pub(crate) const fn command_name(command: &Command) -> &'static str {
         Command::Env(EnvCommand::Status) => "env status",
         Command::Secrets(SecretsCommand::SetIdentity { .. }) => "secrets set-identity",
         Command::Db(DbCommand::RotatePassword) => "db rotate-password",
+        Command::Db(DbCommand::Dump { .. }) => "db dump",
         Command::Publish => "publish",
         Command::Up { .. } => "up",
     }
@@ -130,7 +163,9 @@ pub(crate) async fn dispatch(ctx: &Ctx, command: &Command) -> Result<Value> {
     use crate::ops;
     match command {
         Command::Init { output } => value(crate::template::render_template(&ctx.settings, output)?),
-        Command::Check => value(crate::check::check(&ctx.project_dir, &ctx.terraform).await?),
+        Command::Check { app } => {
+            value(crate::check::check(&ctx.project_dir, &ctx.terraform, *app).await?)
+        }
         Command::Doctor => value(ops::doctor(ctx).await?),
         Command::Bootstrap => value(ops::up::bootstrap(ctx).await?),
         Command::Base => value(ops::up::base(ctx).await?),
@@ -146,6 +181,7 @@ pub(crate) async fn dispatch(ctx: &Ctx, command: &Command) -> Result<Value> {
             value(ops::set_identity(ctx, file.as_deref()).await?)
         }
         Command::Db(DbCommand::RotatePassword) => value(Box::pin(ops::rotate_password(ctx)).await?),
+        Command::Db(DbCommand::Dump { file }) => value(ops::dump(ctx, file.as_deref()).await?),
         Command::Publish => value(ops::publish(ctx).await?),
         Command::Up {
             seed_file,

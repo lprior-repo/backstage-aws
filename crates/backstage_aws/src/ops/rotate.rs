@@ -30,7 +30,8 @@ pub(crate) async fn rotate_password(ctx: &Ctx) -> Result<RotationResult> {
     let ((version_id, replaced), staged) =
         step("secret.stage", stage_new_password(ctx, &secret_arn)).await?;
     let task = "db_admin_rotate_task_definition_arn";
-    let ((), altered) = step("database.alter-role", db::run_task(ctx, &base, task, None)).await?;
+    let alter = db::run_task(ctx, &base, task, Vec::new());
+    let ((), altered) = step("database.alter-role", alter).await?;
     let promotion = ctx
         .secrets
         .update_secret_version_stage()
