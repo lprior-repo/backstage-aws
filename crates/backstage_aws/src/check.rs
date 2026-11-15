@@ -38,8 +38,8 @@ pub(crate) struct CheckResult {
 
 pub(crate) async fn check(project: &Path, terraform: &Path, app: bool) -> Result<CheckResult> {
     let mut passed = Vec::new();
-    for stack in Stack::ALL {
-        let dir = project.join("infra").join(stack.name());
+    for stack in std::iter::once("access").chain(Stack::ALL.map(Stack::name)) {
+        let dir = project.join("infra").join(stack);
         if !dir.is_dir() {
             return Err(Error::precondition_failed(format!(
                 "{} is not a backstage-aws project: {} is missing",
@@ -48,7 +48,7 @@ pub(crate) async fn check(project: &Path, terraform: &Path, app: bool) -> Result
             )));
         }
         for (step, args) in STEPS {
-            let name = format!("{}.{step}", stack.name());
+            let name = format!("{stack}.{step}");
             process::run(
                 terraform.as_os_str(),
                 args,
@@ -105,13 +105,13 @@ mod tests {
     #[tokio::test]
     async fn every_stack_is_checked_and_the_first_failure_stops_the_run() -> TestResult {
         let project = tempfile::tempdir()?;
-        for stack in Stack::ALL {
-            fs::create_dir_all(project.path().join("infra").join(stack.name()))?;
+        for stack in std::iter::once("access").chain(Stack::ALL.map(Stack::name)) {
+            fs::create_dir_all(project.path().join("infra").join(stack))?;
         }
         let terraform = Path::new(FAKE_TERRAFORM);
         let passed = check(project.path(), terraform, false).await?.passed;
-        assert_eq!(passed.len(), 12);
-        assert_eq!(passed.first().map(String::as_str), Some("bootstrap.fmt"));
+        assert_eq!(passed.len(), 16);
+        assert_eq!(passed.first().map(String::as_str), Some("access.fmt"));
         assert_eq!(passed.last().map(String::as_str), Some("env.test"));
 
         fs::remove_file(project.path().join("calls.log"))?;
@@ -121,7 +121,7 @@ mod tests {
             .map(|result| result.passed);
         assert_eq!(failed.map_err(|error| error.code()), Err("TOOL_FAILED"));
         let calls = fs::read_to_string(project.path().join("calls.log"))?;
-        assert_eq!(calls.lines().last(), Some("bootstrap: validate -no-color"));
+        assert_eq!(calls.lines().last(), Some("access: validate -no-color"));
         Ok(())
     }
 

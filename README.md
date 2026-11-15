@@ -22,6 +22,8 @@ cd backstage-aws
 cargo install --locked --path crates/backstage_aws
 ```
 
+Discover prerequisites: `backstage-aws setup`. Read-only; reports the next action and resume command.
+
 Then [prepare a sandbox account and deploy your first PR](docs/quickstart.md). Images build in GitHub Actions; local Docker is optional. Generated workflows require the matching published, attested CLI release.
 
 ## Project status

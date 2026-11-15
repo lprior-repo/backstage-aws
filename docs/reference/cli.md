@@ -4,12 +4,13 @@
 
 ## Commands
 
-All commands except `check` validate deployment settings. Terraform 1.17.2 is checked by all commands except `init` and `doctor` (`check` checks it directly).
+`setup` discovers prerequisites without deployment settings; `check` runs offline. Other commands validate deployment settings. Terraform 1.17.2 is required except for `init`, `setup` and `doctor` (discovery checks it when reached).
 
 | Command | Options | Approval | Result |
 |---|---|---:|---|
+| `setup` | `--aws-cli PATH`, `--profile NAME`, repeated `--confirm CHECK` | No | Read-only ordered discovery; one next action and resumable argv. Confirmations: `organization-email`, `identity-center-mfa`. Ready means run `doctor`, not deployed. |
 | `init --output DIR` | required | No | Render project; destination must be new. Writes `environments/<environment>.env`. |
-| `check [--app]` | `--app` optional | No | Offline Terraform validation/tests; with `--app`, also installs, typechecks, tests, and builds the Backstage app. No AWS credentials. |
+| `check [--app]` | `--app` optional | No | Offline Terraform validation/tests for access, bootstrap, base and env; with `--app`, also installs, typechecks, tests, and builds the Backstage app. No AWS credentials. |
 | `doctor` | — | No | Check Terraform, Docker Buildx, Git, AWS identity/account, GitHub admin access. No changes. |
 | `bootstrap` | — | Yes | Configure Terraform state, GitHub OIDC deploy role and optional account baseline; write env settings. Repeatable. |
 | `base` | — | Yes | Create/update shared network, load balancer, database, registry, secrets; requires ingress CIDR. Repeatable. |

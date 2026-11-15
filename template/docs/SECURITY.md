@@ -4,7 +4,7 @@ GitHub Actions authenticates to AWS with OIDC. Preview role trust is scoped to t
 
 Previews use a separate AWS account from production. Namespaces in an account share the RDS instance, database application role, and base secrets; a namespace is not a tenant security boundary. Use sanitized seed data only.
 
-The ALB's IPv4 CIDR allowlist gates access. Preview sign-in is guest; production defaults to GitHub OAuth. With zero NAT gateways, tasks have public addresses but app ingress is limited to the ALB security group. RDS is private in isolated subnets. Choose `nat-gateways=1` or `2` if private task addresses are required.
+The ALB's IPv4 CIDR allowlist gates access; app ingress is ALB-only. RDS stays isolated. Default tasks have public IPs. `fck-nat=true` gives app/admin tasks private IPs behind one shared, single-AZ instance; `nat-gateways=1/2` uses managed NAT. Do not combine them. fck-nat has no SSH key or IAM role; operators own replacement and AMI patch updates.
 
 Database TLS is required and the app verifies the server certificate. RDS manages the master credential. Only db-admin task roles receive it. The application password stays out of Terraform state and enters tasks through ECS secret injection. The CI deploy role cannot read Secrets Manager values; ECS execution roles do that.
 

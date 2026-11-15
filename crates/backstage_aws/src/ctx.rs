@@ -156,9 +156,20 @@ pub(crate) fn print_success(command: &str, result: impl Serialize) -> Result<()>
     print_envelope(&serde_json::json!({"ok":true,"command":command,"result":result}))
 }
 pub(crate) fn print_failure(command: &str, error: &Error) -> Result<()> {
-    print_envelope(
-        &serde_json::json!({"ok":false,"command":command,"error":{"code":error.code(),"message":error.to_string(),"retryable":error.retryable()}}),
-    )
+    let mut failure = serde_json::json!({
+        "code": error.code(),
+        "message": error.to_string(),
+        "retryable": error.retryable()
+    });
+    if let Error::SetupBlocked(report) = error {
+        let details =
+            serde_json::to_value(report).map_err(|error| Error::state_failed(error.to_string()))?;
+        failure
+            .as_object_mut()
+            .ok_or_else(|| Error::state_failed("error envelope is not an object"))?
+            .insert(String::from("details"), details);
+    }
+    print_envelope(&serde_json::json!({"ok":false,"command":command,"error":failure}))
 }
 fn print_envelope(value: &Value) -> Result<()> {
     let bytes =

@@ -82,6 +82,10 @@ run "preview_role_trusts_the_repository_and_nothing_wider" {
     ]).Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
     error_message = "PassRole must be limited to the four ECS roles and ECS tasks."
   }
+  assert {
+    condition     = aws_iam_role.github_deploy[0].permissions_boundary == "arn:aws:iam::123456789012:policy/backstage-workload-boundary"
+    error_message = "The GitHub deploy role must attach the exact account and project workload permissions boundary."
+  }
 }
 
 run "production_role_trusts_the_main_branch_only" {

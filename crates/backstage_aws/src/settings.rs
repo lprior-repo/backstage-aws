@@ -17,6 +17,8 @@ const ENV_ENVIRONMENT: &str = "BACKSTAGE_AWS_ENVIRONMENT";
 const ENV_MONTHLY_BUDGET: &str = "BACKSTAGE_AWS_MONTHLY_BUDGET_USD";
 const ENV_BASELINE: &str = "BACKSTAGE_AWS_ACCOUNT_BASELINE";
 const ENV_NAT_GATEWAYS: &str = "BACKSTAGE_AWS_NAT_GATEWAYS";
+const ENV_FCK_NAT: &str = "BACKSTAGE_AWS_FCK_NAT";
+const ENV_FCK_NAT_AMI_ID: &str = "BACKSTAGE_AWS_FCK_NAT_AMI_ID";
 const ENV_DATABASE_CLASS: &str = "BACKSTAGE_AWS_DATABASE_INSTANCE_CLASS";
 const ENV_PULL_REQUEST: &str = "BACKSTAGE_AWS_PULL_REQUEST";
 const ENV_MULTI_AZ: &str = "BACKSTAGE_AWS_DATABASE_MULTI_AZ";
@@ -36,7 +38,7 @@ pub(crate) struct Settings {
     /// The project directory that `init` created.
     #[arg(long, env=ENV_PROJECT, default_value=".", global=true)]
     pub(crate) project: PathBuf,
-    // The deployment's identity. Every command except `check` needs these;
+    // The deployment's identity. Commands except `setup` and `check` need these;
     // they default to blank so that validation, not argument parsing, reports
     // the missing ones.
     /// Required. Prefix of every AWS resource name: 3-20 lowercase letters, digits or hyphens.
@@ -134,6 +136,12 @@ pub(crate) struct NetworkSettings {
     /// can reach them.
     #[arg(long, env=ENV_NAT_GATEWAYS, default_value_t=0, global=true)]
     pub(crate) nat_gateways: u8,
+    /// Route private application subnets through a shared fck-nat instance.
+    #[arg(long, env=ENV_FCK_NAT, default_value_t=false, action=clap::ArgAction::Set, global=true)]
+    pub(crate) fck_nat: bool,
+    /// Pin the fck-nat AMI. Only usable when `--fck-nat` is enabled.
+    #[arg(long, env=ENV_FCK_NAT_AMI_ID, global=true)]
+    pub(crate) fck_nat_ami_id: Option<String>,
     /// The database size. One instance serves every environment in the account.
     #[arg(long, env=ENV_DATABASE_CLASS, default_value="db.t4g.micro", global=true)]
     pub(crate) database_instance_class: String,

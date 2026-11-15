@@ -15,6 +15,8 @@ gh release view v0.1.0 --repo lprior-repo/backstage-aws
 
 **Release gate:** generated CI downloads and verifies `v0.1.0`. If unpublished, stop before provisioning: a maintainer must publish the matching attested release. Source installation alone does not make CI usable.
 
+Discover account prerequisites before configuring deployment: `backstage-aws setup`. Follow its next action and resume argv; it makes no changes.
+
 ## 2. Configure
 
 Replace every uppercase placeholder. The repository is your **new Backstage project**, not this CLI repository.

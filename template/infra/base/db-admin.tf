@@ -1,22 +1,31 @@
+locals {
+  workload_permissions_boundary_arn = "arn:${local.partition}:iam::${local.account_id}:policy/${var.name}-workload-boundary"
+}
+
 resource "aws_iam_role" "application_task" {
-  name               = "${var.name}-portal-task"
-  assume_role_policy = local.task_trust_policy
+  name                 = "${var.name}-portal-task"
+  assume_role_policy   = local.task_trust_policy
+  permissions_boundary = local.workload_permissions_boundary_arn
 }
 
 resource "aws_iam_role" "application_execution" {
-  name               = "${var.name}-portal-execution"
-  assume_role_policy = local.task_trust_policy
+  name                 = "${var.name}-portal-execution"
+  assume_role_policy   = local.task_trust_policy
+  permissions_boundary = local.workload_permissions_boundary_arn
 }
 
 resource "aws_iam_role" "db_admin_task" {
-  name               = "${var.name}-db-admin-task"
-  assume_role_policy = local.task_trust_policy
+  name                 = "${var.name}-db-admin-task"
+  assume_role_policy   = local.task_trust_policy
+  permissions_boundary = local.workload_permissions_boundary_arn
 }
 
 resource "aws_iam_role" "db_admin_execution" {
-  name               = "${var.name}-db-admin-execution"
-  assume_role_policy = local.task_trust_policy
+  name                 = "${var.name}-db-admin-execution"
+  assume_role_policy   = local.task_trust_policy
+  permissions_boundary = local.workload_permissions_boundary_arn
 }
+
 
 
 resource "aws_iam_role_policy" "application_execution_base" {
@@ -154,7 +163,8 @@ resource "aws_cloudwatch_log_group" "flow" {
 }
 
 resource "aws_iam_role" "flow_logs" {
-  name = "${var.name}-flow-logs"
+  name                 = "${var.name}-flow-logs"
+  permissions_boundary = local.workload_permissions_boundary_arn
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

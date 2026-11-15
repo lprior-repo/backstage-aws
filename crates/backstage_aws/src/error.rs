@@ -7,6 +7,8 @@ pub(crate) enum Error {
     ApprovalRequired(String),
     #[error("{0}")]
     PreconditionFailed(String),
+    #[error("setup requires the next action in error.details")]
+    SetupBlocked(Box<crate::onboarding::model::Report>),
     #[error("{tool}: {detail}")]
     ToolFailed { tool: String, detail: String },
     #[error("{service} {operation}: {detail}")]
@@ -91,6 +93,7 @@ impl Error {
             Self::InvalidInput(_) => "INVALID_INPUT",
             Self::ApprovalRequired(_) => "APPROVAL_REQUIRED",
             Self::PreconditionFailed(_) => "PRECONDITION_FAILED",
+            Self::SetupBlocked(_) => "SETUP_BLOCKED",
             Self::ToolFailed { .. } => "TOOL_FAILED",
             Self::AwsFailed { .. } => "AWS_FAILED",
             Self::GithubFailed(_) => "GITHUB_FAILED",
@@ -102,7 +105,7 @@ impl Error {
     pub(crate) const fn exit_code(&self) -> u8 {
         match self {
             Self::InvalidInput(_) => 2,
-            Self::ApprovalRequired(_) | Self::PreconditionFailed(_) => 3,
+            Self::ApprovalRequired(_) | Self::PreconditionFailed(_) | Self::SetupBlocked(_) => 3,
             Self::RemoteTimeout { .. } => 5,
             _ => 4,
         }

@@ -23,6 +23,8 @@ pub(crate) struct Cli {
 }
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum Command {
+    #[command(about = "Discover account prerequisites and show the next setup step. Read-only.")]
+    Setup(crate::onboarding::SetupArgs),
     #[command(
         about = "Create a new project directory from the built-in template.",
         long_about = "Creates a new project from the built-in template and writes its settings to environments/<environment>.env. Requires --output DIR; the destination must not exist."
@@ -136,11 +138,16 @@ pub(crate) enum DbCommand {
         file: Option<PathBuf>,
     },
 }
+
+#[cfg(test)]
+#[path = "cli/tests.rs"]
+mod tests;
 fn value<T: Serialize>(result: T) -> Result<Value> {
     serde_json::to_value(result).map_err(|error| Error::state_failed(error.to_string()))
 }
 pub(crate) const fn command_name(command: &Command) -> &'static str {
     match command {
+        Command::Setup(_) => "setup",
         Command::Init { .. } => "init",
         Command::Check { .. } => "check",
         Command::Doctor => "doctor",
@@ -162,6 +169,7 @@ pub(crate) const fn command_name(command: &Command) -> &'static str {
 pub(crate) async fn dispatch(ctx: &Ctx, command: &Command) -> Result<Value> {
     use crate::ops;
     match command {
+        Command::Setup(args) => crate::onboarding::run(&ctx.settings.settings, args).await,
         Command::Init { output } => value(crate::template::render_template(&ctx.settings, output)?),
         Command::Check { app } => {
             value(crate::check::check(&ctx.project_dir, &ctx.terraform, *app).await?)

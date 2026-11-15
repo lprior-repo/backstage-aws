@@ -18,15 +18,18 @@ flowchart LR
     RDS --> Backups[Seven-day PITR]
 ```
 
-## Three stacks
+## Four Terraform stacks
 
 | Stack | Lifetime | Owns |
 |---|---|---|
+| `access` | Owner-managed account setup | Scoped Identity Center provisioner, workload boundary and provisioning policies |
 | `bootstrap` | Account | State/KMS, GitHub OIDC role, optional account baseline/budget |
 | `base` | Shared | VPC, ALB/TLS/DNS, ECS, ECR, RDS, secrets, seed/dump storage, admin tasks |
 | `env` | Namespace | Target group, listener rule, log group, task definition, service |
 
 Slow resources exist before PR deployment. State keys: `bootstrap/terraform.tfstate`, `base/terraform.tfstate`, `env/<namespace>.tfstate` in `<name>-<account>-<region>-tfstate`. Native S3 lockfiles serialize Terraform writers.
+
+`access` is applied separately by an existing owner before the CLI's privileged bootstrap. Its state remains owner-managed; preserve and back it up separately. The provisioner cannot modify its own access policies.
 
 ## Names and data
 
@@ -51,7 +54,7 @@ The five-minute target assumes warm cache/shared infrastructure. CLI timings exc
 - **Accounts:** preview and production separate. Namespaces share one application database role and base secrets—not tenant isolation.
 - **AWS identity:** OIDC audience `sts.amazonaws.com`; preview subject `repo:<repo>:*`, production `repo:<repo>:ref:refs/heads/main`. No GitHub deployment Environments. Protect `main`; preview branch authors can exercise the preview role.
 - **App identity:** guest previews behind an IPv4 allowlist; production GitHub OAuth.
-- **Network:** no NAT by default. Public task IPs; app ingress only from ALB. RDS stays private. `nat-gateways=1/2` enables private task egress at extra cost.
+- **Network:** no NAT by default; public task IPs, ALB-only app ingress. `fck-nat=true` uses one shared instance and private task IPs; `nat-gateways=1/2` uses managed NAT. RDS stays isolated.
 - **Capacity:** one 1-vCPU/2-GB task; Spot except production. Shared `db.t4g.micro`, 20-GB gp3, maximum 100 GB. Cheap, not high availability.
 - **Settings:** shell/CI loads committed `environments/*.env`; CLI reads only flags/env. Secrets use ECS injection.
 

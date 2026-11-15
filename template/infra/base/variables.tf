@@ -64,10 +64,31 @@ variable "nat_gateways" {
   default     = 0
   description = "0 gives tasks public addresses and no NAT charge; 1 or 2 keeps tasks private behind that many NAT gateways."
   validation {
-    condition     = contains([0, 1, 2], var.nat_gateways)
-    error_message = "Use 0, 1 or 2 NAT gateways."
+    condition     = contains([0, 1, 2], var.nat_gateways) && (!var.fck_nat || var.nat_gateways == 0)
+    error_message = "Use 0, 1 or 2 NAT gateways; fck_nat requires nat_gateways = 0."
   }
 }
+variable "fck_nat" {
+  type        = bool
+  default     = false
+  description = "Use one shared fck-nat EC2 instance instead of managed NAT gateways."
+}
+
+variable "fck_nat_ami_id" {
+  type        = string
+  default     = ""
+  description = "Optional exact fck-nat 1.4.0 arm64 AMI ID."
+  validation {
+    condition     = var.fck_nat_ami_id == "" || can(regex("^ami-([0-9a-f]{8}|[0-9a-f]{17})$", var.fck_nat_ami_id))
+    error_message = "fck_nat_ami_id must be empty or an ami- ID with 8 or 17 lowercase hexadecimal characters."
+  }
+  validation {
+    condition     = var.fck_nat || var.fck_nat_ami_id == ""
+    error_message = "fck_nat_ami_id can only be set when fck_nat is enabled."
+  }
+}
+
+
 
 variable "database_instance_class" {
   type    = string

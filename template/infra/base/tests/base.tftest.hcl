@@ -113,4 +113,15 @@ run "base_security_and_outputs" {
     ])
     error_message = "Every ECS role trust must scope the source account and ECS ARN."
   }
+  assert {
+    condition = alltrue([for role in [
+      aws_iam_role.application_task,
+      aws_iam_role.application_execution,
+      aws_iam_role.db_admin_task,
+      aws_iam_role.db_admin_execution,
+      aws_iam_role.flow_logs
+      ] : role.permissions_boundary == "arn:aws:iam::123456789012:policy/backstage-workload-boundary"
+    ])
+    error_message = "Every ECS and VPC flow log role must attach the exact project workload permissions boundary."
+  }
 }

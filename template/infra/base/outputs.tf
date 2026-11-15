@@ -24,12 +24,12 @@ output "db_admin_network_configuration" {
     awsvpcConfiguration = {
       subnets        = aws_subnet.application[*].id
       securityGroups = [aws_security_group.admin.id]
-      assignPublicIp = var.nat_gateways == 0 ? "ENABLED" : "DISABLED"
+      assignPublicIp = var.nat_gateways == 0 && !var.fck_nat ? "ENABLED" : "DISABLED"
     }
   }
 }
 output "application_subnet_ids" { value = aws_subnet.application[*].id }
-output "assign_public_ip" { value = var.nat_gateways == 0 }
+output "assign_public_ip" { value = var.nat_gateways == 0 && !var.fck_nat }
 output "db_admin_security_group_id" { value = aws_security_group.admin.id }
 output "kms_key_arn" { value = aws_kms_key.app.arn }
 output "log_groups" { value = { db_admin = aws_cloudwatch_log_group.db_admin.name, portal = aws_cloudwatch_log_group.portal.name } }
@@ -38,3 +38,5 @@ output "alb_dns_name" { value = aws_lb.main.dns_name }
 output "application_task_role_arn" { value = aws_iam_role.application_task.arn }
 output "application_execution_role_arn" { value = aws_iam_role.application_execution.arn }
 output "database_identifier" { value = aws_db_instance.database.identifier }
+output "fck_nat_ami_id" { value = var.fck_nat ? data.aws_ami.fck_nat[0].id : null }
+output "fck_nat_private_ip" { value = var.fck_nat ? aws_instance.fck_nat[0].private_ip : null }

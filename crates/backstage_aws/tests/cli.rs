@@ -146,7 +146,7 @@ fn check_needs_no_settings_and_init_writes_a_project_once() -> TestResult {
     let checked = run(&["check", project_flag.as_str(), terraform.as_str()])?;
     assert_eq!((checked.exit, checked.ok), (Some(0), Some(true)));
     assert_eq!(
-        checked.result.pointer("/passed/11"),
+        checked.result.pointer("/passed/15"),
         Some(&Value::from("env.test"))
     );
 

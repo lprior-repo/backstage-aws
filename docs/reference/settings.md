@@ -30,7 +30,9 @@ Flags override `BACKSTAGE_AWS_*` variables. Options are global (before or after 
 | `--spot BOOL` | `BACKSTAGE_AWS_SPOT` | `true` except production | Fargate Spot; production default `false`. |
 | `--monthly-budget-usd USD` | `BACKSTAGE_AWS_MONTHLY_BUDGET_USD` | `100` | Integer 1–100000; notification needs `--budget-email`. |
 | `--account-baseline BOOL` | `BACKSTAGE_AWS_ACCOUNT_BASELINE` | `true` | Bootstrap CloudTrail, password policy, S3 public-access block. |
-| `--nat-gateways N` | `BACKSTAGE_AWS_NAT_GATEWAYS` | `0` | Integer 0–2. Zero: tasks use public addresses/direct egress, but only load balancer reaches them. |
+| `--nat-gateways N` | `BACKSTAGE_AWS_NAT_GATEWAYS` | `0` | 0–2 managed gateways. Zero uses public task IPs unless fck-nat is enabled. |
+| `--fck-nat BOOL` | `BACKSTAGE_AWS_FCK_NAT` | `false` | One shared NAT instance; private app/admin IPs. Requires zero managed gateways. |
+| `--fck-nat-ami-id ID` | `BACKSTAGE_AWS_FCK_NAT_AMI_ID` | discovered | Optional exact AMI pin; must match the official publisher and pinned release. Requires fck-nat. |
 | `--database-instance-class CLASS` | `BACKSTAGE_AWS_DATABASE_INSTANCE_CLASS` | `db.t4g.micro` | `db.<alphanumeric>.<alphanumeric>`; one shared instance. |
 | `--database-multi-az BOOL` | `BACKSTAGE_AWS_DATABASE_MULTI_AZ` | `false` | Standby in another AZ; roughly doubles database compute cost. |
 | `--desired-count N` | `BACKSTAGE_AWS_DESIRED_COUNT` | `1` | 1–4 tasks per environment. |

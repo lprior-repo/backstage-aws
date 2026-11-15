@@ -2,9 +2,19 @@
 
 Start with a dedicated **preview sandbox**. Production belongs in a second account.
 
+Start discovery: `backstage-aws setup --profile backstage-preview`. No deployment settings required. It changes nothing; follow `error.details.next`, then rerun `error.details.resume` (argv).
+
+| Account step | Automation boundary |
+|---|---|
+| Organizations, users, permissions, infrastructure | APIs; approval required for changes |
+| Organization Identity Center; MFA enforcement | Console setup |
+| Email verification, password, MFA enrollment, login | Human |
+
+Only after completing the console checks, pass `--confirm organization-email --confirm identity-center-mfa`. These record attestations, not API verification. Organization creation can change Free Tier billing and expire credits: [AWS guidance](https://docs.aws.amazon.com/singlesignon/latest/userguide/enable-identity-center.html).
+
 | Required | Check |
 |---|---|
-| Short-lived, non-root AWS administrator session | `aws sts get-caller-identity` |
+| Short-lived, non-root AWS assumed-role session | `aws sts get-caller-identity` |
 | Public Route 53 zone in that account | Zone ID; delegated name servers |
 | GitHub token and repository push access | `gh auth status` |
 | Terraform **1.17.2**, Git, AWS CLI v2, GitHub CLI | `terraform version` |
@@ -12,6 +22,22 @@ Start with a dedicated **preview sandbox**. Production belongs in a second accou
 | Published, attested CLI release for generated CI | `gh release view v0.1.0 --repo lprior-repo/backstage-aws` |
 
 ## AWS identity
+
+First access: an owner applies [`infra/access`](../template/infra/access/) with Terraform 1.17.2 using an existing short-lived owner session. It creates a one-hour scoped Identity Center provisioner and an owner-controlled workload boundary; no access keys or administrator policy. IAM Identity Center and its user must already exist.
+
+```sh
+export TF_VAR_name=portal
+export TF_VAR_aws_account_id=YOUR_12_DIGIT_ACCOUNT_ID
+export TF_VAR_aws_region=us-east-1
+export TF_VAR_identity_center_region=us-east-1
+export TF_VAR_identity_center_instance_arn=YOUR_EXISTING_INSTANCE_ARN
+export TF_VAR_principal_id=YOUR_EXISTING_USER_ID
+terraform -chdir=template/infra/access init -input=false
+terraform -chdir=template/infra/access plan -input=false -out=access.tfplan
+terraform -chdir=template/infra/access apply -input=false access.tfplan
+```
+
+From a generated project, use `infra/access` instead of `template/infra/access`. Review the plan before applying. Preserve this owner-managed stack's state and keep it outside the scoped provisioner's control. Review its explicit regional/account API exceptions. Leave `hosted_zone_id` and `domain_name` empty until DNS exists; when known, supply both through `TF_VAR_…` variables and reapply. Set `TF_VAR_enable_account_controls=true` only for initial account hardening/audit-baseline writes, then set it to `false` and reapply after bootstrap.
 
 ```sh
 aws configure sso --profile backstage-preview
@@ -53,7 +79,9 @@ No GitHub deployment Environments or environment-scoped variables are required. 
 
 Install [Terraform 1.17.2](https://developer.hashicorp.com/terraform/install), Git, AWS CLI and `gh`. Set Git's author name/email. The CLI rejects other Terraform versions; `BACKSTAGE_AWS_TERRAFORM` can point to the executable.
 
-Docker/Buildx is needed only for local builds, `doctor`, and `up`; the walkthrough builds in CI. Podman is not supported.
+For source development, `rust-toolchain.toml` includes matching `rust-analyzer` and `rust-src` components for OMP/editor navigation. After repairing an existing installation with `rustup component add rust-analyzer rust-src`, reload OMP's LSP servers.
+
+Docker/Buildx is needed for local builds, `setup`, `doctor`, and `up`; discovery also checks daemon access. Podman is not supported.
 
 ## Costs
 

@@ -26,6 +26,8 @@ impl Settings {
             account_baseline: true,
             network: NetworkSettings {
                 nat_gateways: 0,
+                fck_nat: false,
+                fck_nat_ami_id: None,
                 database_instance_class: "db.t4g.micro".into(),
                 database_multi_az: false,
             },
@@ -40,7 +42,7 @@ impl Settings {
     }
 }
 
-fn outcome(change: fn(&mut Settings)) -> Result<(), &'static str> {
+fn outcome(change: impl FnOnce(&mut Settings)) -> Result<(), &'static str> {
     let mut settings = Settings::sample(PathBuf::from("."));
     change(&mut settings);
     settings.validate().map(drop).map_err(|error| error.code())
@@ -48,8 +50,19 @@ fn outcome(change: fn(&mut Settings)) -> Result<(), &'static str> {
 
 #[test]
 fn every_invalid_setting_is_rejected_as_invalid_input() {
-    let cases: [(&str, fn(&mut Settings)); 24] = [
+    let cases: [(&str, fn(&mut Settings)); 27] = [
         ("nat gateways", |s| s.network.nat_gateways = 3),
+        ("fck-nat and managed NAT conflict", |s| {
+            s.network.fck_nat = true;
+            s.network.nat_gateways = 1;
+        }),
+        ("unused fck-nat AMI ID", |s| {
+            s.network.fck_nat_ami_id = Some("ami-12345678".into())
+        }),
+        ("invalid fck-nat AMI ID", |s| {
+            s.network.fck_nat = true;
+            s.network.fck_nat_ami_id = Some("ami-ABCDEF12".into());
+        }),
         ("database class", |s| {
             s.network.database_instance_class = "t4g.micro".into()
         }),
@@ -128,6 +141,15 @@ fn boundary_values_are_accepted() {
         }),
         Ok(())
     );
+    for ami_id in ["ami-1234abcd", "ami-1234567890abcdef0"] {
+        assert_eq!(
+            outcome(|s| {
+                s.network.fck_nat = true;
+                s.network.fck_nat_ami_id = Some(ami_id.into());
+            }),
+            Ok(())
+        );
+    }
 }
 
 #[test]

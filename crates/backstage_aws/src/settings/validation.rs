@@ -107,6 +107,7 @@ impl Settings {
             &mut settings.budget_email,
             &mut settings.alert_email,
             &mut settings.github_oidc_provider_arn,
+            &mut settings.network.fck_nat_ami_id,
         ] {
             if blank(value) {
                 *value = None;
@@ -187,17 +188,42 @@ impl Settings {
     fn validate_sizes(&self) -> Result<()> {
         if !(1..=100_000).contains(&self.monthly_budget_usd)
             || !(1..=4).contains(&self.desired_count)
-            || self.network.nat_gateways > 2
         {
             return Err(Error::invalid_input(
-                "budget, desired count, or NAT gateway count is out of range",
+                "budget or desired count is out of range",
             ));
         }
+        self.validate_network()?;
         require(
             &self.network.database_instance_class,
             r"^db\.[a-z0-9]+\.[a-z0-9]+$",
             "database instance class",
         )
+    }
+
+    pub(crate) fn validate_network(&self) -> Result<()> {
+        if self.network.nat_gateways > 2 {
+            return Err(Error::invalid_input("NAT gateway count is out of range"));
+        }
+        if self.network.fck_nat && self.network.nat_gateways != 0 {
+            return Err(Error::invalid_input(
+                "fck-nat cannot be combined with managed NAT gateways",
+            ));
+        }
+        let ami_id = self
+            .network
+            .fck_nat_ami_id
+            .as_deref()
+            .filter(|ami| !ami.is_empty());
+        if ami_id.is_some() && !self.network.fck_nat {
+            return Err(Error::invalid_input(
+                "fck-nat AMI ID requires fck-nat to be enabled",
+            ));
+        }
+        if ami_id.is_some_and(|ami| !matches(ami, r"^ami-(?:[0-9a-f]{8}|[0-9a-f]{17})$")) {
+            return Err(Error::invalid_input("invalid fck-nat AMI ID"));
+        }
+        Ok(())
     }
 }
 

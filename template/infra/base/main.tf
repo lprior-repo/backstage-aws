@@ -95,10 +95,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# NAT gateways are optional because they cost more than the rest of a small
-# deployment. Without one, the application subnets route to the internet
-# gateway and each task gets a public address; the task security groups still
-# admit nothing but the load balancer.
+# NAT gateways cost more than the rest of a small deployment. Without either
+# NAT mode, tasks get public addresses; security groups still restrict access.
 resource "aws_eip" "nat" {
   count  = var.nat_gateways
   domain = "vpc"
@@ -120,8 +118,9 @@ resource "aws_route" "application" {
   count                  = 2
   route_table_id         = aws_route_table.application[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = var.nat_gateways == 0 ? aws_internet_gateway.main.id : null
-  nat_gateway_id         = var.nat_gateways == 0 ? null : aws_nat_gateway.main[count.index % var.nat_gateways].id
+  gateway_id             = var.nat_gateways == 0 && !var.fck_nat ? aws_internet_gateway.main.id : null
+  nat_gateway_id         = var.nat_gateways == 0 || var.fck_nat ? null : aws_nat_gateway.main[count.index % var.nat_gateways].id
+  network_interface_id   = var.fck_nat ? aws_instance.fck_nat[0].primary_network_interface_id : null
 }
 
 resource "aws_route_table_association" "application" {

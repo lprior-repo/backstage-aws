@@ -43,6 +43,7 @@ resource "aws_iam_role" "github_deploy" {
   count                = var.github_repository != null ? 1 : 0
   name                 = "${var.name}-github-deploy"
   max_session_duration = 3600
+  permissions_boundary = "arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:policy/${var.name}-workload-boundary"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

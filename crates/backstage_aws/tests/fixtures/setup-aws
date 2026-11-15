@@ -1,0 +1,10 @@
+#!/bin/sh
+case "$1/$2" in
+  --version/) echo 'aws-cli/2.40.3 Python/3 Linux' ;;
+  sts/get-caller-identity) echo '{"Account":"123456789012","Arn":"arn:aws:sts::123456789012:assumed-role/Developer/session","UserId":"AROA:session"}' ;;
+  iam/get-account-summary) echo '{"AccountMFAEnabled":1,"AccountAccessKeysPresent":0}' ;;
+  organizations/describe-organization) echo '{"Organization":{"Id":"o-example","MasterAccountId":"123456789012"}}' ;;
+  sso-admin/list-instances) echo '{"Instances":[{"InstanceArn":"arn:aws:sso:::instance/ssoins-example","IdentityStoreId":"d-example","OwnerAccountId":"123456789012","Status":"ACTIVE"}]}' ;;
+  route53/get-hosted-zone) echo '{"HostedZone":{"Id":"/hostedzone/Z123456789ABC","Name":"example.com.","Config":{"PrivateZone":false}},"DelegationSet":{"NameServers":["ns-1.example.net.","ns-2.example.net."]}}' ;;
+  *) echo 'Unexpected operation' >&2; exit 64 ;;
+esac

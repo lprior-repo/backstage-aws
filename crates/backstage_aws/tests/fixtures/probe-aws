@@ -1,0 +1,3 @@
+#!/bin/sh
+# Response scripts are data, never freshly-written executables.
+exec /bin/sh "${0%/*}/aws-response.sh" "$@"

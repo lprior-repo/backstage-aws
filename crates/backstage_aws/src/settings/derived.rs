@@ -61,6 +61,8 @@ impl ValidatedSettings {
             "route53_zone_id": s.route53_zone_id,
             "allowed_ingress_cidrs": s.allowed_ingress_cidrs,
             "nat_gateways": s.network.nat_gateways,
+            "fck_nat": s.network.fck_nat,
+            "fck_nat_ami_id": fck_nat_ami_id(&s.network),
             "database_instance_class": s.network.database_instance_class,
             "database_multi_az": s.network.database_multi_az,
             "alert_email": s.alert_email,
@@ -136,6 +138,8 @@ impl ValidatedSettings {
         set("MAX_HIGH_FINDINGS", &s.max_high_findings);
         set("MAX_CRITICAL_FINDINGS", &s.max_critical_findings);
         set("NAT_GATEWAYS", &s.network.nat_gateways);
+        set("FCK_NAT", &s.network.fck_nat);
+        set("FCK_NAT_AMI_ID", &fck_nat_ami_id(&s.network));
         set(
             "DATABASE_INSTANCE_CLASS",
             &s.network.database_instance_class,
@@ -154,6 +158,13 @@ impl ValidatedSettings {
         lines.push(String::new());
         lines.join("\n")
     }
+}
+
+fn fck_nat_ami_id(network: &super::NetworkSettings) -> &str {
+    if let Some(ami_id) = &network.fck_nat_ami_id {
+        return ami_id;
+    }
+    ""
 }
 
 #[cfg(test)]
@@ -223,6 +234,27 @@ mod tests {
     }
 
     #[test]
+    fn base_tfvars_preserve_fck_nat_and_optional_ami_pin() -> Result<()> {
+        let mut source = Settings::sample(PathBuf::from("."));
+        source.network.fck_nat = true;
+        source.network.fck_nat_ami_id = Some("ami-12345678".into());
+        source.network.database_multi_az = true;
+        let vars = source.validate()?.base_tfvars();
+        assert_eq!(vars.get("fck_nat"), Some(&Value::from(true)));
+        assert_eq!(vars.get("database_multi_az"), Some(&Value::from(true)));
+        assert_eq!(
+            vars.get("fck_nat_ami_id"),
+            Some(&Value::from("ami-12345678"))
+        );
+        let default_vars = Settings::sample(PathBuf::from("."))
+            .validate()?
+            .base_tfvars();
+        assert_eq!(default_vars.get("fck_nat"), Some(&Value::from(false)));
+        assert_eq!(default_vars.get("fck_nat_ami_id"), Some(&Value::from("")));
+        Ok(())
+    }
+
+    #[test]
     fn a_preview_namespace_derives_its_database_hostname_and_state_key() -> Result<()> {
         let settings = Settings::sample(PathBuf::from(".")).validate()?;
         assert_eq!(settings.namespace, "pr-38");
@@ -264,6 +296,8 @@ mod tests {
         let mut settings = Settings::sample(PathBuf::from("."));
         settings.plugin_secrets = vec!["pagerduty=PAGERDUTY_TOKEN:token".into()];
         settings.alert_email = Some("o'hara+${HOME}@example.com".into());
+        settings.network.fck_nat = true;
+        settings.network.fck_nat_ami_id = Some("ami-1234567890abcdef0".into());
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("settings.env");
         std::fs::write(&path, settings.validate()?.settings_file())?;
@@ -285,6 +319,11 @@ mod tests {
             .filter_map(|line| line.split_once('='))
             .collect();
         assert_eq!(values.get("BACKSTAGE_AWS_NAME"), Some(&"portal"));
+        assert_eq!(values.get("BACKSTAGE_AWS_FCK_NAT"), Some(&"true"));
+        assert_eq!(
+            values.get("BACKSTAGE_AWS_FCK_NAT_AMI_ID"),
+            Some(&"ami-1234567890abcdef0")
+        );
         assert_eq!(
             values.get("BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS"),
             Some(&"10.0.0.0/8")

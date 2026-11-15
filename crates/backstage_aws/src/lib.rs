@@ -5,6 +5,7 @@ pub mod ctx;
 pub mod db;
 pub mod error;
 pub mod github;
+pub mod onboarding;
 pub mod ops;
 pub mod process;
 pub mod settings;
@@ -55,6 +56,9 @@ fn output_failure(command: &str, error: &Error) -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<serde_json::Value> {
+    if let cli::Command::Setup(args) = &cli.command {
+        return onboarding::run(&cli.settings, args).await;
+    }
     if let cli::Command::Check { app } = &cli.command {
         // Offline: needs neither deployment settings nor credentials.
         let terraform = cli.settings.terraform_path();

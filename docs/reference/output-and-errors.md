@@ -13,13 +13,15 @@
 
 Success keys: `ok`, `command`, `result`; failure keys: `ok`, `command`, `error` (`code`, `message`, `retryable`). Result fields vary by command. Examples are protocol shapes, not live AWS/GitHub results.
 
+Blocked `setup` adds `error.details`: ordered `checks`, one `next` action, `resume` argv and non-secret `environment`. Status `acknowledged` is an owner attestation; `verified` is observed evidence. Reruns rediscover state; no completion journal.
+
 ## Exit and error codes
 
 | Exit | Code | Meaning | Retryable |
 |---:|---|---|---:|
 | 0 | — | Success | — |
 | 2 | `INVALID_INPUT` | CLI syntax or invalid/missing setting | false |
-| 3 | `APPROVAL_REQUIRED`, `PRECONDITION_FAILED` | Approval missing; blocked by account, identity, prerequisite or permission | false |
+| 3 | `APPROVAL_REQUIRED`, `PRECONDITION_FAILED`, `SETUP_BLOCKED` | Approval missing; blocked by account, identity, prerequisite or permission | false |
 | 4 | `TOOL_FAILED`, `AWS_FAILED`, `GITHUB_FAILED`, `STATE_FAILED`, `DB_TASK_FAILED` | Tool, service/API, GitHub, local state/I/O, or database task failure | false |
 | 5 | `REMOTE_TIMEOUT` | Remote operation continues after wait limit; error names operation and remote ID | true |
 

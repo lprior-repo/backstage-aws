@@ -34,7 +34,7 @@ GITHUB_TOKEN="$(gh auth token)" backstage-aws env up --pull-request 42 --approve
 | Fargate Spot | On except environment `production` | Reclaimable, no capacity guarantee |
 | Monthly budget alert | $100 | Alert, not a cap |
 
-NAT costs extra; set `BACKSTAGE_AWS_NAT_GATEWAYS=1` or `2` before `base` when private task egress is required. Shared idle resources still incur charges. Check regional AWS pricing; no cost or timing is measured.
+Private task egress: `BACKSTAGE_AWS_FCK_NAT=true` for one shared instance, or `BACKSTAGE_AWS_NAT_GATEWAYS=1/2` for managed NAT; rerun `base`. Do not combine them. fck-nat is single-instance/single-AZ, not HA; operators own replacement and AMI patch updates. Shared idle resources incur charges; no cost or timing is measured.
 
 Each namespace has its own database, but namespaces share RDS and the application role; they are not security boundaries. `seed --file` affects future namespaces only. Secrets come from Secrets Manager; ingress CIDRs control ALB access. Fork PRs receive no deploy role.
 
