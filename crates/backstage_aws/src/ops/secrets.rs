@@ -52,7 +52,9 @@ pub(crate) async fn set_identity(ctx: &Ctx, file: Option<&Path>) -> Result<Ident
         .map_err(|_| failed())?;
     Ok(IdentityResult {
         secret_arn,
-        version_id: stored.version_id().unwrap_or_default().to_owned(),
+        version_id: stored
+            .version_id()
+            .map_or_else(String::new, std::borrow::ToOwned::to_owned),
     })
 }
 

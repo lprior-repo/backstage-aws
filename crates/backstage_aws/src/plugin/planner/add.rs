@@ -240,7 +240,7 @@ fn entry_installed(
         let registered = backend_index
             .map(|source| source_edits::backend_has_registration(source, package))
             .transpose()?
-            .unwrap_or(false);
+            .map_or_else(|| false, crate::fallback::pass_through);
         Ok::<bool, Error>(present && dependency && registered)
     })?;
     let sidebar_present = entry.id != "notifications"

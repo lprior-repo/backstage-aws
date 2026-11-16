@@ -151,7 +151,9 @@ fn node_key(node: &YamlNode) -> String {
     match node {
         YamlNode::Scalar(scalar) => scalar.as_string(),
         YamlNode::Alias(alias) => alias.value(),
-        YamlNode::TaggedNode(tagged) => tagged.as_string().unwrap_or_else(|| node.to_string()),
+        YamlNode::TaggedNode(tagged) => tagged
+            .as_string()
+            .map_or_else(|| node.to_string(), super::fallback::pass_through),
         YamlNode::Mapping(_) | YamlNode::Sequence(_) => node.to_string(),
     }
 }

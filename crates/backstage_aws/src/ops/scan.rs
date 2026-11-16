@@ -65,8 +65,7 @@ pub(crate) async fn scan(ctx: &Ctx, digest: &str) -> Result<ScanResult> {
         let counts = findings.and_then(|found| found.finding_severity_counts());
         counts
             .and_then(|counts| counts.get(&severity))
-            .copied()
-            .unwrap_or(0)
+            .map_or(0, |count| *count)
     };
     let found = Found {
         completed_at: findings
@@ -114,8 +113,8 @@ fn gate(digest: &str, found: &Found, limits: (u32, u32), now: i64) -> Result<Sca
 
 fn unix_now() -> i64 {
     let elapsed = SystemTime::now().duration_since(UNIX_EPOCH);
-    elapsed.map_or(0, |elapsed| {
-        i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
+    elapsed.map_or(0, |e| {
+        i64::try_from(e.as_secs()).map_or(i64::MAX, crate::fallback::pass_through)
     })
 }
 

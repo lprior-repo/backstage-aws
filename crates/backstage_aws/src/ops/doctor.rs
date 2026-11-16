@@ -7,7 +7,7 @@ use crate::{
     github, process, terraform,
 };
 use serde::Serialize;
-use std::{ffi::OsStr, path::Path, time::Duration};
+use std::{borrow::ToOwned, ffi::OsStr, path::Path, time::Duration};
 
 #[derive(Serialize)]
 pub(crate) struct DoctorResult {
@@ -41,8 +41,10 @@ pub(crate) async fn doctor(ctx: &Ctx) -> Result<DoctorResult> {
         .send()
         .await
         .map_err(|error| Error::aws_failed("sts", "GetCallerIdentity", error.to_string()))?;
-    let account = identity.account().unwrap_or_default().to_owned();
-    let arn = identity.arn().unwrap_or_default().to_owned();
+    let account = identity
+        .account()
+        .map_or_else(String::new, ToOwned::to_owned);
+    let arn = identity.arn().map_or_else(String::new, ToOwned::to_owned);
     let expected = &ctx.settings.settings.aws_account_id;
     if &account != expected {
         return Err(Error::precondition_failed(format!(

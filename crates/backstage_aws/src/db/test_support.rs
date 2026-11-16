@@ -18,14 +18,16 @@ use std::{
     collections::VecDeque,
     fmt::Debug,
     path::Path,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 static NULL: Value = Value::Null;
 
 /// Looks up a JSON pointer, yielding `null` for a missing path like `Value` indexing does.
 pub fn at<'a>(value: &'a Value, pointer: &str) -> &'a Value {
-    value.pointer(pointer).unwrap_or(&NULL)
+    value
+        .pointer(pointer)
+        .map_or(&NULL, crate::fallback::pass_through)
 }
 
 /// Unwraps a harness invariant that the scenario itself guarantees.
@@ -46,7 +48,10 @@ pub fn succeeded<T, E: Debug>(result: Result<T, E>, step: &str) -> T {
 
 /// Locks shared harness state; a panicking sibling assertion must not mask the real failure.
 pub fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 pub type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;

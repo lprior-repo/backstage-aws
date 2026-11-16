@@ -115,7 +115,7 @@ fn remember(seen: &Seen, text: String) {
 }
 
 fn recorded(seen: &Seen) -> Vec<String> {
-    seen.lock().map(|all| all.clone()).unwrap_or_default()
+    seen.lock().map_or_else(|_| Vec::new(), |all| all.clone())
 }
 
 fn code(code: &str) -> ErrorMetadata {
@@ -162,7 +162,10 @@ fn rig(given: &Given, approve: bool) -> std::result::Result<Rig, Box<dyn std::er
         .match_requests({
             let ours = ours.clone();
             move |r| {
-                remember(&seen, r.policy().unwrap_or_default().to_owned());
+                let policy = r
+                    .policy()
+                    .map_or_else(String::new, std::borrow::ToOwned::to_owned);
+                remember(&seen, policy);
                 ours(r.bucket(), r.expected_bucket_owner())
             }
         })
@@ -539,10 +542,11 @@ fn tagging_rules(
         .match_requests({
             let ours = ours.clone();
             move |r| {
-                let mut tags: Vec<String> = r
+                let tag_set = r
                     .tagging()
                     .map(Tagging::tag_set)
-                    .unwrap_or_default()
+                    .map_or_else(Vec::new, <[aws_sdk_s3::types::Tag]>::to_vec);
+                let mut tags: Vec<String> = tag_set
                     .iter()
                     .map(|t| format!("{}={}", t.key(), t.value()))
                     .collect();
@@ -595,8 +599,11 @@ fn encryption_rules(
             let rules = r
                 .server_side_encryption_configuration()
                 .map(ServerSideEncryptionConfiguration::rules)
-                .unwrap_or_default();
-            for rule in rules {
+                .map_or_else(
+                    Vec::new,
+                    <[aws_sdk_s3::types::ServerSideEncryptionRule]>::to_vec,
+                );
+            for rule in &rules {
                 let default = rule.apply_server_side_encryption_by_default();
                 remember(
                     &seen,

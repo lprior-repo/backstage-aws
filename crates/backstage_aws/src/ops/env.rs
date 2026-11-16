@@ -110,7 +110,9 @@ pub(crate) async fn env_down(ctx: &Ctx) -> Result<EnvDownResult> {
     if let Some(outputs) = &state {
         // Destroy first so no task is connected when the database is dropped.
         let image = outputs.get("image_digest").and_then(Value::as_str);
-        let vars = ctx.settings.env_tfvars(image.unwrap_or(NO_IMAGE));
+        let vars = ctx
+            .settings
+            .env_tfvars(image.map_or(NO_IMAGE, crate::fallback::str_pass_through));
         terraform::destroy(ctx, Stack::Env, &vars).await?;
     }
     db::drop_database(ctx).await?;
@@ -169,7 +171,9 @@ pub(crate) async fn env_status(ctx: &Ctx) -> Result<EnvStatusResult> {
     Ok(EnvStatusResult {
         namespace: ctx.settings.namespace.clone(),
         url: output_str(&outputs, "url")?.to_owned(),
-        service_status: service.status().unwrap_or("UNKNOWN").to_owned(),
+        service_status: service
+            .status()
+            .map_or_else(|| "UNKNOWN".to_owned(), std::borrow::ToOwned::to_owned),
         running_count: service.running_count(),
         image_digest: output_str(&outputs, "image_digest")?.to_owned(),
         ready,

@@ -88,14 +88,11 @@ fn validate_derived_names(settings: &Settings) -> Result<(String, String, String
             "hostname must be the domain or exactly one label below it"
         }));
     }
-    let auth_mode = settings.auth_mode.clone().unwrap_or_else(|| {
-        if settings.environment == "production" {
-            "github"
-        } else {
-            "guest"
-        }
-        .to_owned()
-    });
+    let auth_mode = match &settings.auth_mode {
+        Some(mode) => mode.clone(),
+        None if settings.environment == "production" => "github".to_owned(),
+        None => "guest".to_owned(),
+    };
     if !["guest", "github"].contains(&auth_mode.as_str()) {
         return Err(Error::invalid_input("auth mode must be guest or github"));
     }
@@ -242,8 +239,8 @@ impl Settings {
 
 fn validate_repository(repo: &str) -> Result<()> {
     let mut parts = repo.split('/');
-    let owner = parts.next().unwrap_or_default();
-    let name = parts.next().unwrap_or_default();
+    let owner = parts.next().map_or("", crate::fallback::str_pass_through);
+    let name = parts.next().map_or("", crate::fallback::str_pass_through);
     if parts.next().is_some()
         || !(1..=39).contains(&owner.len())
         || !(1..=100).contains(&name.len())

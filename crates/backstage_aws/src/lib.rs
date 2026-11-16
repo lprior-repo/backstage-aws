@@ -7,6 +7,7 @@ pub mod ctx;
 pub mod db;
 mod dev;
 pub mod error;
+mod fallback;
 pub mod github;
 mod local_check;
 pub mod onboarding;

@@ -41,7 +41,9 @@ fn run(args: &[&str]) -> Result<Outcome, Box<dyn Error>> {
         ok: document.get("ok").and_then(Value::as_bool),
         command: text("/command"),
         code: text("/error/code"),
-        result: document.get("result").cloned().unwrap_or(Value::Null),
+        result: document
+            .get("result")
+            .map_or(Value::Null, std::clone::Clone::clone),
     })
 }
 

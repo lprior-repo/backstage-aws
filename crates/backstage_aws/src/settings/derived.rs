@@ -31,7 +31,8 @@ impl ValidatedSettings {
     /// minutes' notice, which production must not be.
     fn spot(&self) -> bool {
         let s = &self.settings;
-        s.spot.unwrap_or(s.environment != "production")
+        s.spot
+            .map_or(s.environment != "production", crate::fallback::pass_through)
     }
 
     pub(crate) fn bootstrap_tfvars(&self) -> Value {
@@ -149,11 +150,24 @@ impl ValidatedSettings {
         set("SPOT", &self.spot());
         set("ACCOUNT_BASELINE", &s.account_baseline);
         set("MONTHLY_BUDGET_USD", &s.monthly_budget_usd);
-        let blank = String::new();
-        set("BUDGET_EMAIL", s.budget_email.as_ref().unwrap_or(&blank));
-        set("ALERT_EMAIL", s.alert_email.as_ref().unwrap_or(&blank));
-        let provider = s.github_oidc_provider_arn.as_ref().unwrap_or(&blank);
-        set("GITHUB_OIDC_PROVIDER_ARN", provider);
+        set(
+            "BUDGET_EMAIL",
+            &s.budget_email
+                .clone()
+                .map_or_else(String::new, crate::fallback::pass_through),
+        );
+        set(
+            "ALERT_EMAIL",
+            &s.alert_email
+                .clone()
+                .map_or_else(String::new, crate::fallback::pass_through),
+        );
+        set(
+            "GITHUB_OIDC_PROVIDER_ARN",
+            &s.github_oidc_provider_arn
+                .clone()
+                .map_or_else(String::new, crate::fallback::pass_through),
+        );
         // Not a CLI setting: the workflow passes it to the AWS sign-in step.
         set("DEPLOY_ROLE_ARN", &self.deploy_role_arn());
         lines.push(String::new());

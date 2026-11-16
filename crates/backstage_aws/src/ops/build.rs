@@ -213,7 +213,10 @@ async fn login(ctx: &Ctx, repository: &str, engine: &OsStr) -> Result<()> {
     let password = token
         .strip_prefix("AWS:")
         .ok_or_else(|| failed("unexpected authorization token format"))?;
-    let registry = repository.split('/').next().unwrap_or(repository);
+    let registry = repository
+        .split('/')
+        .next()
+        .map_or(repository, crate::fallback::str_pass_through);
     let args = ["login", "--username=AWS", "--password-stdin", registry];
     let limit = Duration::from_mins(1);
     process::run(

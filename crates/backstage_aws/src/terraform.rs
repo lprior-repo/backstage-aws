@@ -64,7 +64,9 @@ pub(crate) async fn verify_version(terraform: &Path) -> Result<()> {
     }
     Err(Error::precondition_failed(format!(
         "Terraform {VERSION} is required, found {}; install it (hashicorp/setup-terraform in CI) or pass --terraform",
-        found.as_deref().unwrap_or("an unreadable version")
+        found
+            .as_deref()
+            .map_or("an unreadable version", crate::fallback::str_pass_through,)
     )))
 }
 

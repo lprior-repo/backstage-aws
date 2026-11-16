@@ -84,7 +84,7 @@ fn assert_invalid_input(output: &Output, message: &str) -> Result<(), Box<dyn Er
     let actual = json
         .pointer("/error/message")
         .and_then(Value::as_str)
-        .unwrap_or_default();
+        .map_or(String::new(), std::string::ToString::to_string);
     assert!(
         actual.contains(message),
         "expected error containing {message:?}, got {actual:?}"
@@ -103,7 +103,7 @@ fn assert_precondition_rejection(output: &Output, message: &str) -> Result<(), B
     let actual = json
         .pointer("/error/message")
         .and_then(Value::as_str)
-        .unwrap_or_default();
+        .map_or(String::new(), std::string::ToString::to_string);
     assert!(
         actual.contains(message),
         "expected error containing {message:?}, got {actual:?}"
@@ -244,7 +244,7 @@ fn release_archive_rejects_a_non_executable_file() -> TestResult {
     assert!(
         json.pointer("/error/message")
             .and_then(Value::as_str)
-            .unwrap_or_default()
+            .map_or(String::new(), std::string::ToString::to_string)
             .contains("not executable")
     );
     Ok(())
@@ -303,7 +303,7 @@ fn release_archive_rejects_an_oversized_compressed_file() -> TestResult {
     assert!(
         json.pointer("/error/message")
             .and_then(Value::as_str)
-            .unwrap_or_default()
+            .map_or(String::new(), std::string::ToString::to_string)
             .contains("archive exceeds")
     );
     Ok(())
@@ -333,7 +333,7 @@ fn release_archive_rejects_an_oversized_declared_binary() -> TestResult {
     assert!(
         json.pointer("/error/message")
             .and_then(Value::as_str)
-            .unwrap_or_default()
+            .map_or(String::new(), std::string::ToString::to_string)
             .contains("exceeds")
     );
     Ok(())

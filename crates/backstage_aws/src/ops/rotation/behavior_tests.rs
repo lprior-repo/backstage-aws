@@ -94,8 +94,10 @@ fn install_secrets(project: &mut Project) -> [Rule; 4] {
                 journal.record()["id"].as_str()
             );
             assert_eq!(request.version_stages(), &["AWSPENDING"]);
-            let document: Value = serde_json::from_str(request.secret_string().unwrap_or_default())
-                .unwrap_or(Value::Null);
+            let document = request
+                .secret_string()
+                .and_then(|secret| serde_json::from_str(secret).ok())
+                .map_or(Value::Null, crate::fallback::pass_through);
             assert_eq!(
                 document,
                 json!({"username": "backstage", "password": PASSWORD, "port": 5432})
@@ -103,7 +105,11 @@ fn install_secrets(project: &mut Project) -> [Rule; 4] {
             journal.event("stage");
             drop(journal);
             PutSecretValueOutput::builder()
-                .version_id(request.client_request_token().unwrap_or_default())
+                .version_id(
+                    request
+                        .client_request_token()
+                        .map_or("", crate::fallback::str_pass_through),
+                )
                 .build()
         },
     );

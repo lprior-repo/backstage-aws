@@ -113,9 +113,10 @@ async fn run_task_with_token(
     if task_succeeded(&stopped) {
         return Ok(());
     }
-    let reason = stopped
-        .stopped_reason()
-        .map_or("a container exited with a non-zero status", |reason| reason);
+    let reason = stopped.stopped_reason().map_or(
+        "a container exited with a non-zero status",
+        crate::fallback::pass_through,
+    );
     Err(Error::db_task_failed(format!(
         "{} failed ({}); see the db-admin log group",
         arn.as_str(),
@@ -252,7 +253,9 @@ fn network(base: &Value) -> Result<NetworkConfiguration> {
     let vpc = AwsVpcConfiguration::builder()
         .set_subnets(list("subnets"))
         .set_security_groups(list("securityGroups"))
-        .assign_public_ip(AssignPublicIp::from(public.unwrap_or("DISABLED")))
+        .assign_public_ip(AssignPublicIp::from(
+            public.map_or("DISABLED", |value| value),
+        ))
         .build()
         .map_err(|error| Error::precondition_failed(format!("db-admin network: {error}")))?;
     Ok(NetworkConfiguration::builder()

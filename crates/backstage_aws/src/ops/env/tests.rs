@@ -96,7 +96,8 @@ impl Project {
     }
 
     fn terraform_calls(&self) -> Vec<String> {
-        let log = fs::read_to_string(self.log()).unwrap_or_default();
+        let log = fs::read_to_string(self.log())
+            .map_or_else(|_| String::new(), crate::fallback::pass_through);
         log.lines().map(str::to_owned).collect()
     }
 }
