@@ -59,7 +59,6 @@ resource "aws_iam_role_policy" "github_deploy" {
     ecr_portal_repository_arn              = "arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${var.aws_account_id}:repository/${var.name}/portal"
     ecs_service_arn                        = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:service/${var.name}-cluster/${var.name}-*"
     ecs_task_definition_arn                = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.name}-*:*"
-    ecs_db_admin_clone_task_definition_arn = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.name}-db-admin-clone:*"
     ecs_cluster_arn                        = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:cluster/${var.name}-cluster"
     ecs_task_arn                           = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task/${var.name}-cluster/*"
     task_role_arns                         = local.task_role_arns

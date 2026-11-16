@@ -55,16 +55,6 @@
     },
     {
       "Effect": "Allow",
-      "Action": "ecs:RunTask",
-      "Resource": ${jsonencode(ecs_db_admin_clone_task_definition_arn)},
-      "Condition": {
-        "ArnEquals": {
-          "ecs:cluster": ${jsonencode(ecs_cluster_arn)}
-        }
-      }
-    },
-    {
-      "Effect": "Allow",
       "Action": "ecs:DescribeTasks",
       "Resource": ${jsonencode(ecs_task_arn)}
     },
