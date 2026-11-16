@@ -153,20 +153,20 @@ impl ValidatedSettings {
         set(
             "BUDGET_EMAIL",
             &s.budget_email
-                .clone()
-                .map_or_else(String::new, crate::fallback::pass_through),
+                .as_deref()
+                .map_or("", crate::fallback::str_pass_through),
         );
         set(
             "ALERT_EMAIL",
             &s.alert_email
-                .clone()
-                .map_or_else(String::new, crate::fallback::pass_through),
+                .as_deref()
+                .map_or("", crate::fallback::str_pass_through),
         );
         set(
             "GITHUB_OIDC_PROVIDER_ARN",
             &s.github_oidc_provider_arn
-                .clone()
-                .map_or_else(String::new, crate::fallback::pass_through),
+                .as_deref()
+                .map_or("", crate::fallback::str_pass_through),
         );
         // Not a CLI setting: the workflow passes it to the AWS sign-in step.
         set("DEPLOY_ROLE_ARN", &self.deploy_role_arn());
