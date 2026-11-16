@@ -15,6 +15,7 @@ mock_provider "aws" {
 }
 
 variables {
+  name                         = "portal"
   aws_account_id               = "123456789012"
   identity_center_instance_arn = "arn:aws:sso:::instance/ssoins-0123456789abcdef"
   principal_id                 = "01234567-89ab-cdef-0123-456789abcdef"
@@ -107,6 +108,19 @@ run "optional_permissions_are_scoped_and_fit_aws_policy_limits" {
       if statement.Sid == "NoPaidExportableCertificates"
     ])
     error_message = "Access must not enable billable exportable certificates."
+  }
+  assert {
+    condition = one([
+      for statement in jsondecode(aws_iam_policy.account_controls[0].policy).Statement :
+      length(setsubtract(
+        toset(["Project", "ManagedBy", "Purpose"]),
+        toset(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"])
+      )) == 0 &&
+      statement.Condition.StringEquals["aws:RequestTag/Project"] == var.name &&
+      statement.Resource == ["arn:aws:cloudtrail:ap-southeast-1:123456789012:trail/abcdefghijklmnopqr-account"]
+      if try(statement.Sid, "") == "TagProjectTrail"
+    ])
+    error_message = "The exact project trail must accept every bootstrap provider-default tag without allowing another project."
   }
 }
 

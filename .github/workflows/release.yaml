@@ -25,9 +25,13 @@ jobs:
         run: |
           rustup target add "${{ matrix.target }}"
           cargo build --locked --release --target "${{ matrix.target }}"
+          binary="target/${{ matrix.target }}/release/backstage-aws"
+          version="$("$binary" --version)"
+          test "$GITHUB_REF_NAME" = "v${version#backstage-aws }"
           mkdir -p "dist/${{ matrix.target }}"
           cp "target/${{ matrix.target }}/release/backstage-aws" "dist/${{ matrix.target }}/backstage-aws"
           tar -C "dist/${{ matrix.target }}" -czf "backstage-aws-${{ matrix.target }}.tar.gz" backstage-aws
+          "$binary" check --release-archive "backstage-aws-${{ matrix.target }}.tar.gz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backstage-aws-${{ matrix.target }}

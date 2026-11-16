@@ -13,6 +13,15 @@ pub(super) async fn delegation(
     profile: Option<&str>,
     settings: &Settings,
 ) -> Result<std::result::Result<Check, Check>> {
+    delegation_with_dig(program, profile, settings, Path::new("dig")).await
+}
+
+pub(super) async fn delegation_with_dig(
+    program: &Path,
+    profile: Option<&str>,
+    settings: &Settings,
+    dig_program: &Path,
+) -> Result<std::result::Result<Check, Check>> {
     let query = "{HostedZone:{Id:HostedZone.Id,Name:HostedZone.Name,Config:{PrivateZone:HostedZone.Config.PrivateZone}},DelegationSet:{NameServers:DelegationSet.NameServers}}";
     let mut argv = vec![
         "route53".into(),
@@ -52,7 +61,7 @@ pub(super) async fn delegation(
         ));
     }
     let dig = match invoke(
-        Path::new("dig"),
+        dig_program,
         &[
             "@1.1.1.1".into(),
             "+short".into(),
@@ -195,11 +204,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dns_uses_label_boundaries_and_normalized_sets() {
+    fn dns_uses_label_boundaries_and_normalized_sets()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         assert!(domain_belongs("app.example.com", "example.com"));
         assert!(!domain_belongs("example.com.attacker", "example.com"));
-        let servers =
-            nameservers(b"NS1.EXAMPLE.NET.\nns2.example.net\n").expect("name servers parse");
+        let servers = nameservers(b"NS1.EXAMPLE.NET.\nns2.example.net\n")?;
         assert_eq!(
             servers,
             ["ns1.example.net".to_owned(), "ns2.example.net".to_owned()]
@@ -207,5 +216,6 @@ mod tests {
                 .collect()
         );
         assert!(nameservers(b"not a name server\n").is_err());
+        Ok(())
     }
 }

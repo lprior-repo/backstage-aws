@@ -27,5 +27,5 @@ jobs:
           path: app/**/node_modules
           key: ${{ runner.os }}-v24.22.1-node_modules-${{ hashFiles('app/yarn.lock', 'app/**/package.json') }}
       - name: Install native build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++ pkg-config libsecret-1-dev
-      - run: backstage-aws check --app
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++ pkg-config libsecret-1-dev postgresql-16
+      - run: backstage-aws check --runtime --postgres-bin /usr/lib/postgresql/16/bin

@@ -1,7 +1,11 @@
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  partition  = data.aws_partition.current.partition
-  azs        = slice(data.aws_availability_zones.available.names, 0, 2)
+  # A domain and its Route 53 zone are set together or not at all. Without them
+  # the load balancer serves plain HTTP on port 80 to the ingress allow-list.
+  domain_enabled = var.domain_name != ""
+  listener_arn   = local.domain_enabled ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
+  partition      = data.aws_partition.current.partition
+  azs            = slice(data.aws_availability_zones.available.names, 0, 2)
 }
 
 data "aws_partition" "current" {}
@@ -10,34 +14,11 @@ resource "aws_kms_key" "app" {
   description             = "${var.name} shared application encryption"
   enable_key_rotation     = true
   deletion_window_in_days = 30
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "EnableAccountAdministration"
-      Effect    = "Allow"
-      Principal = { AWS = "arn:${local.partition}:iam::${local.account_id}:root" }
-      Action    = "kms:*"
-      Resource  = "*"
-      }, {
-      Sid       = "AllowCloudWatchLogsEncryption"
-      Effect    = "Allow"
-      Principal = { Service = "logs.${var.aws_region}.amazonaws.com" }
-      Action    = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]
-      Resource  = "*"
-      Condition = {
-        StringLike = {
-          "kms:EncryptionContext:aws:logs:arn" = "arn:${local.partition}:logs:${var.aws_region}:${local.account_id}:log-group:/backstage/${var.name}/*"
-        }
-      }
-      }, {
-      # Alarms cannot publish to a topic encrypted with the AWS-managed SNS key.
-      Sid       = "AllowAlarmsToPublishToTheEncryptedTopic"
-      Effect    = "Allow"
-      Principal = { Service = "cloudwatch.amazonaws.com" }
-      Action    = ["kms:Decrypt", "kms:GenerateDataKey*"]
-      Resource  = "*"
-    }]
-  })
+  policy = jsonencode(jsondecode(templatefile("${path.module}/policies/application-kms-key.json.tftpl", {
+    root_principal_arn          = "arn:${local.partition}:iam::${local.account_id}:root"
+    logs_service_principal      = "logs.${var.aws_region}.amazonaws.com"
+    logs_encryption_context_arn = "arn:${local.partition}:logs:${var.aws_region}:${local.account_id}:log-group:/backstage/${var.name}/*"
+  })))
 }
 
 resource "aws_kms_alias" "app" {
@@ -160,7 +141,7 @@ resource "aws_security_group" "database" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "https" {
-  for_each          = toset(var.allowed_ingress_cidrs)
+  for_each          = local.domain_enabled ? toset(var.allowed_ingress_cidrs) : toset([])
   security_group_id = aws_security_group.alb.id
   ip_protocol       = "tcp"
   from_port         = 443
@@ -242,80 +223,31 @@ resource "aws_lb" "main" {
   desync_mitigation_mode     = "strictest"
 }
 
-resource "aws_acm_certificate" "wildcard" {
-  domain_name               = var.domain_name
-  subject_alternative_names = ["*.${var.domain_name}"]
-  validation_method         = "DNS"
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# The apex and wildcard names validate with the same record, hence the overwrite.
-resource "aws_route53_record" "validation" {
-  for_each        = toset([var.domain_name, "*.${var.domain_name}"])
-  allow_overwrite = true
-  zone_id         = var.route53_zone_id
-  name            = one([for option in aws_acm_certificate.wildcard.domain_validation_options : option.resource_record_name if option.domain_name == each.key])
-  type            = one([for option in aws_acm_certificate.wildcard.domain_validation_options : option.resource_record_type if option.domain_name == each.key])
-  records         = [one([for option in aws_acm_certificate.wildcard.domain_validation_options : option.resource_record_value if option.domain_name == each.key])]
-  ttl             = 60
-}
-
-resource "aws_acm_certificate_validation" "wildcard" {
-  certificate_arn         = aws_acm_certificate.wildcard.arn
-  validation_record_fqdns = [for record in aws_route53_record.validation : record.fqdn]
-}
-
+# Port 80 is the only listener without a domain: environments attach their
+# host-header rules here and it serves plain HTTP to the ingress allow-list.
+# With a domain it only redirects, and domain.tf adds the HTTPS listener.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
   default_action {
-    type = "redirect"
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
+    type = local.domain_enabled ? "redirect" : "fixed-response"
+    dynamic "redirect" {
+      for_each = local.domain_enabled ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
     }
-  }
-}
-
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.main.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.wildcard.certificate_arn
-  default_action {
-    type = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      message_body = "Not Found"
-      status_code  = "404"
+    dynamic "fixed_response" {
+      for_each = local.domain_enabled ? [] : [1]
+      content {
+        content_type = "text/plain"
+        message_body = "Not Found"
+        status_code  = "404"
+      }
     }
-  }
-}
-
-resource "aws_route53_record" "apex" {
-  zone_id = var.route53_zone_id
-  name    = var.domain_name
-  type    = "A"
-  alias {
-    name                   = aws_lb.main.dns_name
-    zone_id                = aws_lb.main.zone_id
-    evaluate_target_health = true
-  }
-}
-
-resource "aws_route53_record" "wildcard" {
-  zone_id = var.route53_zone_id
-  name    = "*.${var.domain_name}"
-  type    = "A"
-  alias {
-    name                   = aws_lb.main.dns_name
-    zone_id                = aws_lb.main.zone_id
-    evaluate_target_health = true
   }
 }
 
@@ -393,6 +325,26 @@ resource "aws_secretsmanager_secret_version" "app_db" {
   secret_string_wo_version = 1
 }
 
+# Dedicated lifecycle DB login secret: ephemeral, write-only Terraform pattern.
+# Used by the clone/drop task to connect as a CREATEDB role (not master).
+resource "aws_secretsmanager_secret" "db_lifecycle" {
+  name                    = "${var.name}/database-lifecycle"
+  kms_key_id              = aws_kms_key.app.arn
+  recovery_window_in_days = 7
+}
+
+ephemeral "random_password" "db_lifecycle" {
+  length           = 48
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "aws_secretsmanager_secret_version" "db_lifecycle" {
+  secret_id                = aws_secretsmanager_secret.db_lifecycle.id
+  secret_string_wo         = jsonencode({ username = "backstage_lifecycle", password = ephemeral.random_password.db_lifecycle.result })
+  secret_string_wo_version = 1
+}
+
 resource "aws_secretsmanager_secret" "session" {
   name                    = "${var.name}/session"
   kms_key_id              = aws_kms_key.app.arn
@@ -454,17 +406,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "seed" {
 
 resource "aws_s3_bucket_policy" "seed" {
   bucket = aws_s3_bucket.seed.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "DenyInsecureTransport"
-      Effect    = "Deny"
-      Principal = "*"
-      Action    = "s3:*"
-      Resource  = [aws_s3_bucket.seed.arn, "${aws_s3_bucket.seed.arn}/*"]
-      Condition = { Bool = { "aws:SecureTransport" = "false" } }
-    }]
-  })
+  policy = jsonencode(jsondecode(templatefile("${path.module}/policies/seed-bucket.json.tftpl", {
+    bucket_arns = [aws_s3_bucket.seed.arn, "${aws_s3_bucket.seed.arn}/*"]
+  })))
 }
 
 resource "aws_db_subnet_group" "database" {

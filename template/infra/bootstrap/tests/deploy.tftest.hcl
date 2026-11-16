@@ -74,8 +74,8 @@ run "preview_role_trusts_the_repository_and_nothing_wider" {
       ]).Resource == [
       "arn:aws:iam::123456789012:role/backstage-portal-execution",
       "arn:aws:iam::123456789012:role/backstage-portal-task",
-      "arn:aws:iam::123456789012:role/backstage-db-admin-task",
-      "arn:aws:iam::123456789012:role/backstage-db-admin-execution"
+      "arn:aws:iam::123456789012:role/backstage-db-lifecycle-task",
+      "arn:aws:iam::123456789012:role/backstage-db-lifecycle-execution"
       ] && one([
         for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement
         if contains(flatten([statement.Action]), "iam:PassRole")

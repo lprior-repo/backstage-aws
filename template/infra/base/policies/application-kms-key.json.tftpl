@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EnableAccountAdministration",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": ${jsonencode(root_principal_arn)}
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowCloudWatchLogsEncryption",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": ${jsonencode(logs_service_principal)}
+      },
+      "Action": ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "kms:EncryptionContext:aws:logs:arn": ${jsonencode(logs_encryption_context_arn)}
+        }
+      }
+    },
+    {
+      "Sid": "AllowAlarmsToPublishToTheEncryptedTopic",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudwatch.amazonaws.com"
+      },
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey*"],
+      "Resource": "*"
+    }
+  ]
+}

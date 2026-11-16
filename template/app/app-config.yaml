@@ -39,4 +39,3 @@ catalog:
         - allow: [User, Group]
     - type: file
       target: ../../catalog/entities.yaml
-    - type: file

@@ -1,13 +1,19 @@
 #![forbid(unsafe_code)]
+mod app_config;
 pub mod check;
 pub mod cli;
+pub mod container;
 pub mod ctx;
 pub mod db;
+mod dev;
 pub mod error;
 pub mod github;
+mod local_check;
 pub mod onboarding;
 pub mod ops;
+mod plugin;
 pub mod process;
+mod release_check;
 pub mod settings;
 pub mod template;
 pub mod terraform;
@@ -59,13 +65,31 @@ async fn run(cli: Cli) -> Result<serde_json::Value> {
     if let cli::Command::Setup(args) = &cli.command {
         return onboarding::run(&cli.settings, args).await;
     }
-    if let cli::Command::Check { app } = &cli.command {
+    if let cli::Command::Check {
+        app,
+        runtime,
+        postgres_bin,
+        release_archive,
+    } = &cli.command
+    {
         // Offline: needs neither deployment settings nor credentials.
+        let request = cli::check_request(
+            *app,
+            *runtime,
+            postgres_bin.as_deref(),
+            release_archive.as_deref(),
+        )?;
         let terraform = cli.settings.terraform_path();
-        terraform::verify_version(&terraform).await?;
-        let checked = check::check(&cli.settings.project, &terraform, *app).await?;
+        if request.needs_project() {
+            terraform::verify_version(&terraform).await?;
+        }
+        let checked = check::check(&cli.settings.project, &terraform, request).await?;
         return serde_json::to_value(checked)
             .map_err(|error| Error::state_failed(error.to_string()));
+    }
+    if cli.command.is_project_local() {
+        // Offline: edits or runs the local app; needs no deployment settings or credentials.
+        return cli::project_command(&cli.settings, &cli.command).await;
     }
     let settings = cli.settings.validate()?;
     let region = aws_config::Region::new(settings.settings.aws_region.clone());

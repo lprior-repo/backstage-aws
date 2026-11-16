@@ -1,0 +1,253 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "NamedWorkloadCapabilities",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:CompleteLayerUpload",
+        "ecr:DescribeImages",
+        "ecr:DescribeImageScanFindings",
+        "ecr:DescribeRepositories",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart",
+        "ecr:StartImageScan",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DeleteLogGroup",
+        "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:AssociateKmsKey",
+        "logs:DisassociateKmsKey",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "ecs:CreateService",
+        "ecs:DeleteService",
+        "ecs:UpdateService",
+        "ecs:RegisterTaskDefinition",
+        "ecs:TagResource",
+        "ecs:DescribeTasks",
+        "ecs:DescribeServices",
+        "ecs:DescribeClusters",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        ${jsonencode("arn:${partition}:ecr:${region}:${account_id}:repository/${name}/portal")},
+        ${jsonencode("arn:${partition}:logs:${region}:${account_id}:log-group:/backstage/${name}/*")},
+        ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:service/${name}-cluster/${name}-*")},
+        ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task-definition/${name}-*:*")},
+        ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task/${name}-cluster/*")},
+        ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")},
+        ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-seed/*")},
+        ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-tfstate/*")},
+        ${jsonencode("arn:${partition}:secretsmanager:${region}:${account_id}:secret:${name}/*")}
+      ]
+    },
+    {
+      "Sid": "RegionalApiExceptions",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition",
+        "elasticloadbalancing:Describe*",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": ${jsonencode(region)}
+        }
+      }
+    },
+    {
+      "Sid": "ClusterTaskListing",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListTasks",
+        "ecs:ListServices"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+        }
+      }
+    },
+    {
+      "Sid": "CloneOnlyInProjectCluster",
+      "Effect": "Allow",
+      "Action": "ecs:RunTask",
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task-definition/${name}-db-admin-clone:*")},
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+        }
+      }
+    },
+    {
+      "Sid": "PassPortalRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PassLifecycleRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-lifecycle-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-lifecycle-execution")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "ReadProjectRdsMaster",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": ${jsonencode("arn:${partition}:secretsmanager:${region}:${account_id}:secret:rds!db-*")},
+      "Condition": {
+        "StringEquals": {
+          "secretsmanager:ResourceTag/aws:secretsmanager:owningService": "rds",
+          "secretsmanager:ResourceTag/aws:rds:primaryDBInstanceArn": ${jsonencode("arn:${partition}:rds:${region}:${account_id}:db:${name}-postgres")}
+        }
+      }
+    },
+    {
+      "Sid": "ProjectBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketVersioning"
+      ],
+      "Resource": [
+        ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-tfstate")},
+        ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-seed")}
+      ]
+    },
+    {
+      "Sid": "DecryptProjectSecretKey",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": ${jsonencode("arn:${partition}:kms:${region}:${account_id}:key/*")},
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": ${jsonencode("secretsmanager.${region}.${dns_suffix}")},
+          "aws:ResourceTag/Project": ${jsonencode(name)}
+        }
+      }
+    },
+    {
+      "Sid": "ProjectS3Encryption",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:kms:${region}:${account_id}:key/*")},
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": ${jsonencode("s3.${region}.${dns_suffix}")},
+          "aws:ResourceTag/Project": ${jsonencode(name)}
+        },
+        "ArnLike": {
+          "kms:EncryptionContext:aws:s3:arn": [
+            ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-tfstate")},
+            ${jsonencode("arn:${partition}:s3:::${name}-${account_id}-${region}-seed/*")}
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ProjectFlowLogEncryption",
+      "Effect": "Allow",
+      "Action": "kms:GenerateDataKey",
+      "Resource": ${jsonencode("arn:${partition}:kms:${region}:${account_id}:key/*")},
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": ${jsonencode(name)},
+          "aws:RequestedRegion": ${jsonencode(region)},
+          "aws:PrincipalArn": ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-flow-logs")}
+        }
+      }
+    },
+    {
+      "Sid": "ProjectListenerRules",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateRule",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:AddTags"
+      ],
+      "Resource": [
+        ${jsonencode("arn:${partition}:elasticloadbalancing:${region}:${account_id}:listener/app/${name}-alb/*")},
+        ${jsonencode("arn:${partition}:elasticloadbalancing:${region}:${account_id}:listener-rule/app/${name}-alb/*")}
+      ]
+    },
+    {
+      "Sid": "CreateTaggedTargets",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:CreateTargetGroup",
+      "Resource": ${jsonencode("arn:${partition}:elasticloadbalancing:${region}:${account_id}:targetgroup/bs-*/*")},
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": ${jsonencode(name)}
+        }
+      }
+    },
+    {
+      "Sid": "TagNewTargets",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:AddTags",
+      "Resource": ${jsonencode("arn:${partition}:elasticloadbalancing:${region}:${account_id}:targetgroup/bs-*/*")},
+      "Condition": {
+        "StringEquals": {
+          "elasticloadbalancing:CreateAction": "CreateTargetGroup",
+          "aws:RequestTag/Project": ${jsonencode(name)}
+        }
+      }
+    },
+    {
+      "Sid": "MaintainOwnedTargets",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:AddTags",
+        "elasticloadbalancing:RemoveTags",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:DeleteTargetGroup"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:elasticloadbalancing:${region}:${account_id}:targetgroup/bs-*/*")},
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": ${jsonencode(name)}
+        }
+      }
+    }
+  ]
+}

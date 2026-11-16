@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect":"Allow","Action":["iam:UpdateAccountPasswordPolicy","s3:PutAccountPublicAccessBlock"],"Resource":"*"},
+    {"Effect":"Allow","Action":["s3:CreateBucket","s3:PutBucketTagging","s3:PutBucketPublicAccessBlock","s3:PutBucketVersioning","s3:PutEncryptionConfiguration","s3:PutBucketPolicy"],"Resource":[${jsonencode(audit_bucket_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)}}}},
+    {"Sid":"CreateProjectTrail","Effect":"Allow","Action":["cloudtrail:CreateTrail"],"Resource":[${jsonencode(trail_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)},"aws:RequestTag/Project":${jsonencode(project)}}}},
+    {"Sid":"ManageProjectTrail","Effect":"Allow","Action":["cloudtrail:UpdateTrail","cloudtrail:PutEventSelectors","cloudtrail:StartLogging","cloudtrail:StopLogging","cloudtrail:DeleteTrail"],"Resource":[${jsonencode(trail_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)}}}},
+    {"Sid":"TagProjectTrail","Effect":"Allow","Action":["cloudtrail:AddTags"],"Resource":[${jsonencode(trail_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)},"aws:RequestTag/Project":${jsonencode(project)}},"ForAllValues:StringEquals":{"aws:TagKeys":["Project","ManagedBy","Environment","Purpose"]}}},
+    {"Sid":"UntagProjectTrailWithoutChangingOwner","Effect":"Allow","Action":["cloudtrail:RemoveTags"],"Resource":[${jsonencode(trail_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)}},"ForAllValues:StringEquals":{"aws:TagKeys":["ManagedBy","Environment"]}}},
+    {"Sid":"CreateProjectAnalyzer","Effect":"Allow","Action":["access-analyzer:CreateAnalyzer"],"Resource":[${jsonencode(analyzer_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)},"aws:RequestTag/Project":${jsonencode(project)}}}},
+    {"Sid":"ManageProjectAnalyzer","Effect":"Allow","Action":["access-analyzer:DeleteAnalyzer"],"Resource":[${jsonencode(analyzer_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)}}}},
+    {"Sid":"TagProjectAnalyzer","Effect":"Allow","Action":["access-analyzer:TagResource"],"Resource":[${jsonencode(analyzer_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)},"aws:RequestTag/Project":${jsonencode(project)}}}},
+    {"Sid":"UntagProjectAnalyzer","Effect":"Allow","Action":["access-analyzer:UntagResource"],"Resource":[${jsonencode(analyzer_arn)}],"Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)}},"ForAllValues:StringEquals":{"aws:TagKeys":["ManagedBy","Environment"]}}}
+  ]
+}

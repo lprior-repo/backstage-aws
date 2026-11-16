@@ -14,20 +14,25 @@ use std::{env, ffi::OsStr, time::Duration};
 
 const ACTIONS_BOT_ID: u64 = 41_898_282;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommentIdentity {
     AuthenticatedLogin,
-    ActionsBot,
+    ActionsInstallationToken,
 }
 
-fn comment_identity() -> CommentIdentity {
-    match (
-        env::var("GITHUB_ACTIONS").as_deref(),
-        env::var("GITHUB_TOKEN"),
-    ) {
-        (Ok("true"), Ok(token)) if !token.is_empty() => CommentIdentity::ActionsBot,
+fn comment_identity(actions: Option<&str>, has_github_token: bool) -> CommentIdentity {
+    match (actions, has_github_token) {
+        (Some("true"), true) => CommentIdentity::ActionsInstallationToken,
         _ => CommentIdentity::AuthenticatedLogin,
     }
+}
+
+fn is_auth_identity_unavailable(error: &octocrab::Error) -> bool {
+    matches!(
+        error,
+        octocrab::Error::GitHub { source, .. }
+            if matches!(source.status_code.as_u16(), 401 | 403)
+    )
 }
 
 const COMMENT_PAGE_SIZE: usize = 100;
@@ -66,9 +71,11 @@ pub(crate) async fn comment(ctx: &Ctx, text: &str) -> Result<Option<String>> {
     let (Some(number), Some(_)) = (settings.settings.pull_request, token()) else {
         return Ok(None);
     };
+    let actions = env::var("GITHUB_ACTIONS").ok();
+    let has_github_token = env::var("GITHUB_TOKEN").is_ok_and(|value| !value.is_empty());
     comment_with_client(
         &client()?,
-        comment_identity(),
+        comment_identity(actions.as_deref(), has_github_token),
         &settings.settings.github_repository,
         number,
         &settings.namespace,
@@ -85,19 +92,20 @@ async fn comment_with_client(
     namespace: &str,
     text: &str,
 ) -> Result<Option<String>> {
-    let user: Option<Value> = match identity {
-        CommentIdentity::AuthenticatedLogin => {
-            Some(octo.get("/user", None::<&()>).await.map_err(failed)?)
-        }
-        CommentIdentity::ActionsBot => None,
-    };
-    let caller = match user.as_ref() {
-        Some(user) => CommentOwner::Login(
+    let identity_response = octo.get::<Value, _, _>("/user", None::<&()>).await;
+    let caller = match identity_response.as_ref() {
+        Ok(user) => CommentOwner::Login(
             user.get("login")
                 .and_then(Value::as_str)
                 .ok_or_else(|| Error::github_failed("GitHub /user response has no login"))?,
         ),
-        None => CommentOwner::Id(ACTIONS_BOT_ID),
+        Err(error)
+            if matches!(identity, CommentIdentity::ActionsInstallationToken)
+                && is_auth_identity_unavailable(error) =>
+        {
+            CommentOwner::Id(ACTIONS_BOT_ID)
+        }
+        Err(error) => return Err(failed(error)),
     };
     let marker = format!("<!-- backstage-aws:{namespace} -->");
     let body = json!({"body": format!("{marker}\n{text}")});
@@ -232,7 +240,7 @@ pub(crate) async fn publish(ctx: &Ctx) -> Result<PublishResult> {
     let url = format!("https://github.com/{repository}.git");
     run(&["remote", verb, "origin", &url]).await?;
     // Publishes the checked-out commit without renaming or moving any local branch.
-    run(&["push", "origin", "HEAD:refs/heads/main"]).await?;
+    push_main(git, dir, &url).await?;
     let commit = String::from_utf8_lossy(&capture(&["rev-parse", "HEAD"]).await?)
         .trim()
         .to_owned();
@@ -241,4 +249,15 @@ pub(crate) async fn publish(ctx: &Ctx) -> Result<PublishResult> {
         created,
         commit,
     })
+}
+
+async fn push_main(git: &OsStr, dir: &std::path::Path, url: &str) -> Result<()> {
+    process::run(
+        git,
+        &["push", url, "HEAD:refs/heads/main"],
+        dir,
+        None,
+        GIT_LIMIT,
+    )
+    .await
 }

@@ -3,6 +3,19 @@
 //! The base stack defines the task definitions (`psql` and `pg_restore`). This
 //! module only starts them, with validated non-secret environment overrides,
 //! and waits for the result.
+mod operation;
+pub(crate) use operation::{
+    Checkpoint, OperationId, SecretVersionId, SeedDumpKey, TaskArn, TaskAttempt, TaskAttemptId,
+    TaskLaunch, TaskTerminal,
+};
+mod seed;
+mod seed_recovery;
+pub(crate) use operation::read_checkpoint_body;
+pub(crate) use seed::seed;
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
 use crate::{
     ctx::{Ctx, poll},
     error::{Error, Result},
@@ -12,19 +25,9 @@ use aws_sdk_ecs::types::{
     AssignPublicIp, AwsVpcConfiguration, ContainerOverride, KeyValuePair, LaunchType,
     NetworkConfiguration, TaskOverride,
 };
-use aws_sdk_s3::primitives::ByteStream;
-use serde::Serialize;
+
 use serde_json::Value;
-use std::{path::Path, time::Duration};
-
-/// The object key the restore task downloads.
-const SEED_KEY: &str = "seed.dump";
-
-#[derive(Serialize)]
-pub(crate) struct SeedResult {
-    bucket: String,
-    key: &'static str,
-}
+use std::time::Duration;
 
 /// Creates the application role and the empty `seed` database, and sets the
 /// role's password from its secret. Safe to repeat.
@@ -55,39 +58,102 @@ async fn namespace_task(ctx: &Ctx, action: &str) -> Result<()> {
     run_task(ctx, &base, task, vec![overrides]).await
 }
 
-/// Uploads a custom-format `pg_dump` file and restores it into `seed`.
-pub(crate) async fn seed(ctx: &Ctx, file: &Path) -> Result<SeedResult> {
-    ctx.require_approval()?;
-    let base = terraform::required_outputs(ctx, Stack::Base).await?;
-    let bucket = output_str(&base, "seed_bucket_name")?.to_owned();
-    let body = ByteStream::from_path(file)
-        .await
-        .map_err(|error| Error::invalid_input(format!("{}: {error}", file.display())))?;
-    ctx.s3
-        .put_object()
-        .bucket(&bucket)
-        .key(SEED_KEY)
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| Error::aws_failed("s3", "PutObject", error.to_string()))?;
-    let task = "db_admin_seed_restore_task_definition_arn";
-    run_task(ctx, &base, task, Vec::new()).await?;
-    Ok(SeedResult {
-        bucket,
-        key: SEED_KEY,
-    })
-}
-
-/// Runs one db-admin task definition to completion and requires every
-/// container to exit with status 0. `overrides` holds at most one entry per
-/// container.
+/// Runs one db-admin task to completion and requires every container to exit
+/// successfully.
 pub(crate) async fn run_task(
     ctx: &Ctx,
     base: &Value,
     task_output: &str,
     overrides: Vec<ContainerOverride>,
 ) -> Result<()> {
+    run_task_with_token(ctx, base, task_output, overrides, None).await
+}
+
+pub(crate) async fn start_rotation_task(
+    ctx: &Ctx,
+    base: &Value,
+    task_output: &str,
+    operation_id: OperationId,
+    attempt_id: TaskAttemptId,
+) -> Result<TaskArn> {
+    let operation_id = operation_id.as_str();
+    let pair = || {
+        KeyValuePair::builder()
+            .name("ROTATION_ID")
+            .value(&operation_id)
+            .build()
+    };
+    let secret_reader = ContainerOverride::builder()
+        .name("rotation-secret")
+        .environment(pair())
+        .build();
+    let db_admin = ContainerOverride::builder()
+        .name("db-admin")
+        .environment(pair())
+        .build();
+    start_tracked_task(
+        ctx,
+        base,
+        task_output,
+        vec![secret_reader, db_admin],
+        attempt_id,
+    )
+    .await
+}
+
+async fn run_task_with_token(
+    ctx: &Ctx,
+    base: &Value,
+    task_output: &str,
+    overrides: Vec<ContainerOverride>,
+    client_token: Option<&str>,
+) -> Result<()> {
+    let arn = start_task(ctx, base, task_output, overrides, client_token).await?;
+    let stopped = await_stopped(ctx, base, &arn).await?;
+    if task_succeeded(&stopped) {
+        return Ok(());
+    }
+    let reason = stopped
+        .stopped_reason()
+        .map_or("a container exited with a non-zero status", |reason| reason);
+    Err(Error::db_task_failed(format!(
+        "{} failed ({}); see the db-admin log group",
+        arn.as_str(),
+        reason
+    )))
+}
+
+pub(crate) async fn start_tracked_task(
+    ctx: &Ctx,
+    base: &Value,
+    task_output: &str,
+    overrides: Vec<ContainerOverride>,
+    attempt_id: TaskAttemptId,
+) -> Result<TaskArn> {
+    let token = attempt_id.as_str();
+    start_task(ctx, base, task_output, overrides, Some(&token)).await
+}
+
+pub(crate) async fn observe_tracked_task(
+    ctx: &Ctx,
+    base: &Value,
+    arn: &TaskArn,
+) -> Result<TaskTerminal> {
+    let stopped = await_stopped(ctx, base, arn).await?;
+    Ok(if task_succeeded(&stopped) {
+        TaskTerminal::Succeeded
+    } else {
+        TaskTerminal::Failed
+    })
+}
+
+async fn start_task(
+    ctx: &Ctx,
+    base: &Value,
+    task_output: &str,
+    overrides: Vec<ContainerOverride>,
+    client_token: Option<&str>,
+) -> Result<TaskArn> {
     let cluster = output_str(base, "ecs_cluster_name")?;
     let failed = |detail: String| Error::aws_failed("ecs", "RunTask", detail);
     let started = ctx
@@ -97,6 +163,7 @@ pub(crate) async fn run_task(
         .task_definition(output_str(base, task_output)?)
         .launch_type(LaunchType::Fargate)
         .network_configuration(network(base)?)
+        .set_client_token(client_token.map(str::to_owned))
         .overrides(
             TaskOverride::builder()
                 .set_container_overrides(Some(overrides))
@@ -110,27 +177,66 @@ pub(crate) async fn run_task(
         .first()
         .and_then(|task| task.task_arn())
         .ok_or_else(|| failed(format!("no task started: {:?}", started.failures())))?;
+    TaskArn::parse(arn.to_owned())
+}
+
+async fn await_stopped(ctx: &Ctx, base: &Value, arn: &TaskArn) -> Result<aws_sdk_ecs::types::Task> {
+    observe_stopped(ctx, base, arn).await?.ok_or_else(|| {
+        Error::precondition_failed(format!(
+            "ECS no longer has task {}; its outcome is unknown, not failed",
+            arn.as_str()
+        ))
+    })
+}
+
+async fn observe_stopped(
+    ctx: &Ctx,
+    base: &Value,
+    arn: &TaskArn,
+) -> Result<Option<aws_sdk_ecs::types::Task>> {
+    let cluster = output_str(base, "ecs_cluster_name")?;
     let describe = || async {
-        let request = ctx.ecs.describe_tasks().cluster(cluster).tasks(arn);
+        let request = ctx
+            .ecs
+            .describe_tasks()
+            .cluster(cluster)
+            .tasks(arn.as_str());
         let described = request
             .send()
             .await
             .map_err(|error| Error::aws_failed("ecs", "DescribeTasks", error.to_string()))?;
+        if described
+            .failures()
+            .iter()
+            .any(|failure| failure.reason() == Some("MISSING"))
+        {
+            return Ok(Some(None));
+        }
+        if !described.failures().is_empty() {
+            return Err(Error::aws_failed(
+                "ecs",
+                "DescribeTasks",
+                format!("{:?}", described.failures()),
+            ));
+        }
         let task = described.tasks().first().cloned();
-        Ok(task.filter(|task| task.last_status() == Some("STOPPED")))
+        Ok(task
+            .filter(|task| task.last_status() == Some("STOPPED"))
+            .map(Some))
     };
-    // Thirty minutes, checked every two seconds.
-    let stopped = poll("database task", arn, Duration::from_secs(2), 900, describe).await?;
+    poll(
+        "database task",
+        arn.as_str(),
+        Duration::from_secs(2),
+        900,
+        describe,
+    )
+    .await
+}
+
+fn task_succeeded(stopped: &aws_sdk_ecs::types::Task) -> bool {
     let containers = stopped.containers();
-    if !containers.is_empty() && containers.iter().all(|one| one.exit_code() == Some(0)) {
-        return Ok(());
-    }
-    Err(Error::db_task_failed(format!(
-        "{arn} failed ({}); see the db-admin log group",
-        stopped
-            .stopped_reason()
-            .unwrap_or("a container exited with a non-zero status")
-    )))
+    !containers.is_empty() && containers.iter().all(|one| one.exit_code() == Some(0))
 }
 
 /// Where the base stack says db-admin tasks run. They need a public address
@@ -237,7 +343,7 @@ mod tests {
                     && vpc.and_then(AwsVpcConfiguration::assign_public_ip)
                         == Some(&AssignPublicIp::Enabled)
                     && request.overrides().map(TaskOverride::container_overrides)
-                        == Some(&[expected.clone()])
+                        == Some(std::slice::from_ref(&expected))
             })
             .then_output(|| {
                 RunTaskOutput::builder()

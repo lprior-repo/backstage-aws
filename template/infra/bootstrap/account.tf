@@ -70,29 +70,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "audit" {
 resource "aws_s3_bucket_policy" "audit" {
   count  = var.enable_account_baseline ? 1 : 0
   bucket = aws_s3_bucket.audit[0].id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "TrailACL", Effect = "Allow", Principal = { Service = "cloudtrail.amazonaws.com" },
-        Action    = "s3:GetBucketAcl", Resource = aws_s3_bucket.audit[0].arn,
-        Condition = { StringEquals = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:cloudtrail:${var.aws_region}:${var.aws_account_id}:trail/${var.name}-account" } }
-      },
-      {
-        Sid    = "TrailWrite", Effect = "Allow", Principal = { Service = "cloudtrail.amazonaws.com" },
-        Action = "s3:PutObject", Resource = "${aws_s3_bucket.audit[0].arn}/AWSLogs/${var.aws_account_id}/*",
-        Condition = { StringEquals = {
-          "s3:x-amz-acl"  = "bucket-owner-full-control",
-          "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:cloudtrail:${var.aws_region}:${var.aws_account_id}:trail/${var.name}-account"
-        } }
-      },
-      {
-        Sid       = "TLSOnly", Effect = "Deny", Principal = "*", Action = "s3:*",
-        Resource  = [aws_s3_bucket.audit[0].arn, "${aws_s3_bucket.audit[0].arn}/*"],
-        Condition = { Bool = { "aws:SecureTransport" = "false" } }
-      }
+  policy = jsonencode(jsondecode(templatefile("${path.module}/policies/audit-bucket.json.tftpl", {
+    audit_bucket_arn           = aws_s3_bucket.audit[0].arn
+    cloudtrail_trail_arn       = "arn:${data.aws_partition.current.partition}:cloudtrail:${var.aws_region}:${var.aws_account_id}:trail/${var.name}-account"
+    cloudtrail_logs_object_arn = "${aws_s3_bucket.audit[0].arn}/AWSLogs/${var.aws_account_id}/*"
+    audit_bucket_resources = [
+      aws_s3_bucket.audit[0].arn,
+      "${aws_s3_bucket.audit[0].arn}/*"
     ]
-  })
+  })))
 }
 resource "aws_cloudtrail" "account" {
   count                         = var.enable_account_baseline ? 1 : 0

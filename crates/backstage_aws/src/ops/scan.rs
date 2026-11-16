@@ -122,12 +122,175 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_sdk_ecr::{
+        operation::{
+            describe_image_scan_findings::{
+                DescribeImageScanFindingsError, DescribeImageScanFindingsOutput,
+            },
+            start_image_scan::{StartImageScanError, StartImageScanOutput},
+        },
+        types::{
+            FindingSeverity, ImageScanFindings, ImageScanStatus, ScanStatus,
+            error::LimitExceededException,
+        },
+    };
+    use aws_sdk_s3::{operation::get_object::GetObjectOutput, primitives::ByteStream};
+    use aws_smithy_mocks::{Rule, RuleMode, mock, mock_client};
+    use std::time::SystemTime;
+
+    const DIGEST: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    const BASE_STATE: &str = r#"{"outputs":{"ecr_repository_name":{"value":"portal-images"}}}"#;
+
+    #[derive(Clone, Copy)]
+    enum Start {
+        Succeeds,
+        LimitRefused,
+        Fails,
+    }
+
+    async fn run(
+        start_behavior: Start,
+        waiter_fails: bool,
+    ) -> std::result::Result<(Result<ScanResult>, Rule, Rule), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let mut ctx = Ctx::sample(dir.path(), true)?;
+        ctx.settings.settings.max_critical_findings = 2;
+        ctx.settings.settings.max_high_findings = 3;
+        let base = mock!(aws_sdk_s3::Client::get_object)
+            .match_requests(|request| request.key() == Some("base/terraform.tfstate"))
+            .then_output(|| {
+                GetObjectOutput::builder()
+                    .body(ByteStream::from_static(BASE_STATE.as_bytes()))
+                    .build()
+            });
+        ctx.s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&base]);
+        let start = match start_behavior {
+            Start::Succeeds => mock!(aws_sdk_ecr::Client::start_image_scan)
+                .match_requests(|request| {
+                    request.repository_name() == Some("portal-images")
+                        && request.image_id().and_then(|image| image.image_digest()) == Some(DIGEST)
+                })
+                .then_output(|| StartImageScanOutput::builder().build()),
+            Start::LimitRefused => mock!(aws_sdk_ecr::Client::start_image_scan)
+                .match_requests(|request| {
+                    request.repository_name() == Some("portal-images")
+                        && request.image_id().and_then(|image| image.image_digest()) == Some(DIGEST)
+                })
+                .then_error(|| {
+                    StartImageScanError::LimitExceededException(
+                        LimitExceededException::builder()
+                            .message("already scanning")
+                            .build(),
+                    )
+                }),
+            Start::Fails => mock!(aws_sdk_ecr::Client::start_image_scan)
+                .match_requests(|request| {
+                    request.repository_name() == Some("portal-images")
+                        && request.image_id().and_then(|image| image.image_digest()) == Some(DIGEST)
+                })
+                .then_error(|| StartImageScanError::unhandled("private start diagnostic")),
+        };
+        let describe = if waiter_fails {
+            mock!(aws_sdk_ecr::Client::describe_image_scan_findings)
+                .match_requests(|request| {
+                    request.repository_name() == Some("portal-images")
+                        && request.image_id().and_then(|image| image.image_digest()) == Some(DIGEST)
+                })
+                .then_error(|| {
+                    DescribeImageScanFindingsError::unhandled("private waiter diagnostic")
+                })
+        } else {
+            mock!(aws_sdk_ecr::Client::describe_image_scan_findings)
+                .match_requests(|request| {
+                    request.repository_name() == Some("portal-images")
+                        && request.image_id().and_then(|image| image.image_digest()) == Some(DIGEST)
+                })
+                .then_output(|| {
+                    let findings = ImageScanFindings::builder()
+                        .image_scan_completed_at(
+                            aws_smithy_types::DateTime::from(SystemTime::now()),
+                        )
+                        .finding_severity_counts(FindingSeverity::Critical, 1)
+                        .finding_severity_counts(FindingSeverity::High, 2)
+                        .build();
+                    DescribeImageScanFindingsOutput::builder()
+                        .image_scan_status(
+                            ImageScanStatus::builder()
+                                .status(ScanStatus::Complete)
+                                .build(),
+                        )
+                        .image_scan_findings(findings)
+                        .build()
+                })
+        };
+        ctx.ecr = mock_client!(aws_sdk_ecr, RuleMode::MatchAny, [&start, &describe]);
+        let result = scan(&ctx, DIGEST).await;
+        Ok((result, start, describe))
+    }
+
+    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
+    #[tokio::test]
+    async fn scan_uses_the_requested_digest_and_maps_actual_severity_counts() -> TestResult {
+        let (result, start, describe) = run(Start::Succeeds, false).await?;
+
+        assert_eq!(
+            result?,
+            ScanResult {
+                image_digest: DIGEST.to_owned(),
+                critical: 1,
+                high: 2,
+            }
+        );
+        assert_eq!((start.num_calls(), describe.num_calls()), (1, 1));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_ecr_scan_limit_refusal_uses_the_completed_existing_scan() -> TestResult {
+        let (result, start, describe) = run(Start::LimitRefused, false).await?;
+
+        assert_eq!(
+            result?,
+            ScanResult {
+                image_digest: DIGEST.to_owned(),
+                critical: 1,
+                high: 2,
+            }
+        );
+        assert_eq!((start.num_calls(), describe.num_calls()), (1, 1));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_unexpected_scan_start_failure_stops_before_waiting() -> TestResult {
+        let (result, start, describe) = run(Start::Fails, false).await?;
+
+        assert_eq!(
+            result.map(|_| ()).map_err(|error| error.code()),
+            Err("AWS_FAILED")
+        );
+        assert_eq!((start.num_calls(), describe.num_calls()), (1, 0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_ecr_waiter_failure_is_returned_after_starting_the_scan() -> TestResult {
+        let (result, start, describe) = run(Start::Succeeds, true).await?;
+
+        assert_eq!(
+            result.map(|_| ()).map_err(|error| error.code()),
+            Err("AWS_FAILED")
+        );
+        assert_eq!((start.num_calls(), describe.num_calls()), (1, 1));
+        Ok(())
+    }
 
     const NOW: i64 = 1_800_000_000;
 
     fn found(age: Option<i64>, critical: i32, high: i32) -> Found {
         Found {
-            completed_at: age.map(|age| NOW - age),
+            completed_at: age.and_then(|age| NOW.checked_sub(age)),
             critical,
             high,
         }
@@ -163,6 +326,21 @@ mod tests {
                 result.map_err(|error| error.code()),
                 Err("PRECONDITION_FAILED")
             );
+        }
+    }
+
+    #[test]
+    fn scans_at_both_age_boundaries_are_accepted_and_adjacent_ages_are_rejected() {
+        for (age, expected) in [
+            (MAX_AGE_SECS, Ok((0, 0))),
+            (-CLOCK_SKEW_SECS, Ok((0, 0))),
+            (MAX_AGE_SECS + 1, Err("PRECONDITION_FAILED")),
+            (-CLOCK_SKEW_SECS - 1, Err("PRECONDITION_FAILED")),
+        ] {
+            let result = gate("sha256:aa", &found(Some(age), 0, 0), (0, 0), NOW)
+                .map(|scan| (scan.critical, scan.high))
+                .map_err(|error| error.code());
+            assert_eq!(result, expected, "age={age}");
         }
     }
 }

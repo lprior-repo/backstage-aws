@@ -42,4 +42,6 @@ runs:
           --repo "__BACKSTAGE_AWS_CLI_REPOSITORY__"
         tar -xzf "$directory/backstage-aws-x86_64-unknown-linux-gnu.tar.gz" -C "$directory"
         chmod +x "$directory/backstage-aws"
+        test "$("$directory/backstage-aws" --version)" = "backstage-aws __BACKSTAGE_AWS_CLI_VERSION__"
+        "$directory/backstage-aws" check --release-archive "$directory/backstage-aws-x86_64-unknown-linux-gnu.tar.gz"
         echo "$directory" >> "$GITHUB_PATH"

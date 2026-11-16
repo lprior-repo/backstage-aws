@@ -1,5 +1,6 @@
 use super::{action_required, invoke, verified};
 use crate::{
+    container::ContainerEngine,
     error::{Error, Result},
     settings::Settings,
 };
@@ -91,28 +92,29 @@ pub(super) async fn tools(
             format!("Terraform 1.17.2 is required; found {terraform_version}."),
         )));
     }
-    if let Some(check) =
-        check_tool("docker", &["buildx", "version"], "Docker Buildx", settings).await?
-    {
-        return Ok(Err(check));
-    }
-    if let Some(check) = check_tool(
-        "docker",
-        &["info", "--format", "{{.ServerVersion}}"],
-        "Docker engine",
-        settings,
-    )
-    .await?
-    {
-        return Ok(Err(check));
+    let engine = settings.container_engine;
+    let (checks, summary): (&[(&[&str], &str)], &str) = match engine {
+        ContainerEngine::Docker => (
+            &[
+                (&["buildx", "version"], "Docker Buildx"),
+                (&["info", "--format", "{{.ServerVersion}}"], "Docker engine"),
+            ],
+            "Terraform 1.17.2, Docker Buildx, Docker engine, and Git are available.",
+        ),
+        ContainerEngine::Podman => (
+            &[(&["info"], "Podman")],
+            "Terraform 1.17.2, Podman, and Git are available.",
+        ),
+    };
+    for (argv, label) in checks {
+        if let Some(check) = check_tool(engine.program(), argv, label, settings).await? {
+            return Ok(Err(check));
+        }
     }
     if let Some(check) = check_tool("git", &["--version"], "Git", settings).await? {
         return Ok(Err(check));
     }
-    Ok(Ok(verified(
-        super::Stage::LocalTools,
-        "Terraform 1.17.2, Docker Buildx, Docker engine, and Git are available.",
-    )))
+    Ok(Ok(verified(super::Stage::LocalTools, summary)))
 }
 
 async fn check_tool(
@@ -166,9 +168,25 @@ fn parse_version(bytes: &[u8]) -> Result<String> {
             "format_version",
             "development",
             "target",
+            "terraform_outdated",
         ],
         "Terraform version",
     )?;
     let version = super::parse::string(object, "terraform_version", "Terraform version")?;
     Ok(version.to_owned())
+}
+#[cfg(test)]
+mod tests {
+    use super::parse_version;
+
+    #[test]
+    fn terraform_official_version_json_accepts_the_outdated_field() {
+        let response = br#"{
+            "terraform_version": "1.17.2",
+            "platform": "linux_amd64",
+            "provider_selections": {},
+            "terraform_outdated": false
+        }"#;
+        assert_eq!(parse_version(response).ok().as_deref(), Some("1.17.2"));
+    }
 }

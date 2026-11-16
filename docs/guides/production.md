@@ -1,65 +1,88 @@
 # Production
 
-Production is a separate AWS account and environment named `production`. Its name disables Spot by default; explicitly set `BACKSTAGE_AWS_SPOT=false` so a copied preview setting cannot change that. The generated production workflow trusts the same repository's `main` branch and uses GitHub OIDC—no AWS keys or GitHub deployment Environment.
+Use a separate AWS account and `production` environment. Production does not use Spot by default. Generated production deploys use GitHub OIDC and the `<name>-github-deploy` role, whose trust is limited to the configured repository's `refs/heads/main`. No GitHub Deployment Environment or long-lived AWS key is required.
 
-## Prepare the second account
+Every successful `backstage-aws` command exits 0 and prints one JSON document. Exit 2 means invalid input, 3 blocked/precondition, 4 external or state failure, and 5 timeout; remote work may continue after exit 5.
 
-Use [Prerequisites](../prerequisites.md) for the production account, public DNS zone, short-lived operator credentials and Terraform 1.17.2. Use a production hostname/domain, restrictive ingress CIDRs, and the same GitHub repository as the preview project. GitHub Actions builds the image; no local Docker/Buildx is needed.
+## Configure the account
 
-Set production values in the shell (do not source preview settings). Clear inherited namespace, PR and OIDC-provider selectors; explicitly choose production auth and capacity:
+1. In the generated project root, set production values and short-lived credentials. Use Terraform 1.17.2, a real production domain with its Route 53 zone (HTTPS; domain-free mode is plain HTTP and is for sandboxes only), and ingress CIDRs that match the intended users:
 
-```sh
-export AWS_PROFILE=backstage-production
-export BACKSTAGE_AWS_NAME=portal
-export BACKSTAGE_AWS_ENVIRONMENT=production
-export BACKSTAGE_AWS_AWS_ACCOUNT_ID=PRODUCTION_ACCOUNT_ID
-export BACKSTAGE_AWS_AWS_REGION=us-east-1
-export BACKSTAGE_AWS_DOMAIN_NAME=YOUR_PRODUCTION_DOMAIN
-export BACKSTAGE_AWS_ROUTE53_ZONE_ID=PRODUCTION_ZONE_ID
-export BACKSTAGE_AWS_GITHUB_REPOSITORY=OWNER/REPOSITORY
-export BACKSTAGE_AWS_OWNER_GITHUB_ID=YOUR_NUMERIC_GITHUB_ID
-export BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS=YOUR_PUBLIC_IPV4/32
-export BACKSTAGE_AWS_AUTH_MODE=github
-export BACKSTAGE_AWS_SPOT=false
-unset BACKSTAGE_AWS_PULL_REQUEST BACKSTAGE_AWS_NAMESPACE BACKSTAGE_AWS_HOSTNAME
-unset BACKSTAGE_AWS_GITHUB_OIDC_PROVIDER_ARN BACKSTAGE_AWS_PROJECT
-aws sts get-caller-identity
-```
+   ```sh
+   export AWS_PROFILE=backstage-production
+   export BACKSTAGE_AWS_NAME=portal
+   export BACKSTAGE_AWS_ENVIRONMENT=production
+   export BACKSTAGE_AWS_AWS_ACCOUNT_ID=PRODUCTION_ACCOUNT_ID
+   export BACKSTAGE_AWS_AWS_REGION=us-east-1
+   export BACKSTAGE_AWS_DOMAIN_NAME=YOUR_PRODUCTION_DOMAIN
+   export BACKSTAGE_AWS_ROUTE53_ZONE_ID=PRODUCTION_ZONE_ID
+   export BACKSTAGE_AWS_GITHUB_REPOSITORY=OWNER/REPOSITORY
+   export BACKSTAGE_AWS_OWNER_GITHUB_ID=YOUR_NUMERIC_GITHUB_ID
+   export BACKSTAGE_AWS_ALLOWED_INGRESS_CIDRS=YOUR_ALLOWED_IPV4_CIDR/32
+   export BACKSTAGE_AWS_AUTH_MODE=github
+   export BACKSTAGE_AWS_SPOT=false
+   unset BACKSTAGE_AWS_PULL_REQUEST BACKSTAGE_AWS_NAMESPACE BACKSTAGE_AWS_HOSTNAME
+   unset BACKSTAGE_AWS_GITHUB_OIDC_PROVIDER_ARN BACKSTAGE_AWS_PROJECT
+   aws sts get-caller-identity
+   ```
 
-Confirm the account ID and non-root role. If this account already has GitHub's OIDC provider, set its ARN after the `unset`; otherwise bootstrap creates it. Set `BACKSTAGE_AWS_ACCOUNT_BASELINE=false` only when the account's controls are already managed and you have reviewed the change.
+   Expected: the AWS command exits 0 and reports the production account and a non-root operator role. If the account already has the GitHub OIDC provider, set `BACKSTAGE_AWS_GITHUB_OIDC_PROVIDER_ARN` to its ARN after the `unset`; otherwise bootstrap creates it. Set `BACKSTAGE_AWS_ACCOUNT_BASELINE=false` only when account controls are already managed and reviewed.
 
-## Bootstrap and deploy
+## Bootstrap, identity, and publish
 
-Run from the generated project root; do not load `preview.env`.
+2. Bootstrap the state/backend and deploy role, then create the shared base:
 
-```sh
-backstage-aws bootstrap --approve
-backstage-aws base --approve
-backstage-aws secrets set-identity --file /secure/oauth.json --approve
-```
+   ```sh
+   backstage-aws bootstrap --approve
+   backstage-aws base --approve
+   ```
 
-`/secure/oauth.json`: `clientId` and `clientSecret`. Keep it outside Git. OAuth callback: `https://YOUR_PRODUCTION_HOST/api/auth/github/handler/frame`. Optionally seed with `backstage-aws seed --file /secure/production.dump --approve`.
+   Expected: both exit 0. `bootstrap` JSON has `result.state_migrated`, `result.settings_file`, and `result.deploy_role_arn`; `base` JSON has `result.outputs`. Bootstrap writes `environments/production.env`. Do not load preview settings for these operations.
+3. Store the GitHub OAuth app credentials from a private file outside Git:
 
-Bootstrap writes `environments/production.env`; generated workflow files live in `.github/workflows/`, **not** `template/.github/`. Review and commit `production.env` and workflow changes to the existing repository's `main`. That enables deploy-on-push and manual dispatch. The workflow checks out `main`, assumes the role via OIDC, builds/scans the image, and runs `env up --scan --approve`. Protect `main`; the role trust is limited to it. No GitHub Environment approval is configured.
+   ```sh
+   set -a; . environments/production.env; set +a
+   chmod 600 /secure/oauth.json
+   backstage-aws secrets set-identity --file /secure/oauth.json --approve
+   ```
 
-## Operate
+   The JSON keys are `clientId` and `clientSecret`. Expected: exit 0 and JSON `result.secret_arn` and `result.version_id`; secret values are not printed. The configured callback is `https://YOUR_PRODUCTION_HOST/api/auth/github/handler/frame`. This command writes a Secrets Manager version but does not restart running tasks.
+4. Review the full checkout, including `environments/production.env` and generated `.github/workflows/`, then publish to enable the main-branch production workflow:
 
-```sh
-set -a; . environments/production.env; set +a
-backstage-aws env status
-# In CI; locally requires Docker, or supply an existing --digest.
-backstage-aws env up --scan --approve
-```
+   ```sh
+   git status --short
+   set -a; . environments/production.env; set +a
+   GITHUB_TOKEN="$(gh auth token)" backstage-aws publish --approve
+   ```
 
-Avoid concurrent local and CI mutations. A healthy ECS/ALB target does not verify login, DNS, migrations or business behavior. `env down` deletes the production namespace database; it is not rollback.
+   Expected: `git status` exits 0; `publish` exits 0 and returns JSON `result.repository`, `result.created`, and `result.commit`. `publish` stages all checkout changes, commits if dirty, and pushes the checked-out `HEAD` to `main`; it requires repository-admin token access. If main is protected, publish through the normal reviewed branch/PR process instead. The generated production workflow runs `env up --scan --approve` on push to main or manual dispatch; manual dispatch accepts an optional image digest.
 
-## Capacity and recovery
+## Operate and recover
 
-| Default | Limit |
-| --- | --- |
-| `db.t4g.micro`, 20 GiB gp3 | Inexpensive baseline, not capacity advice |
-| 1-vCPU/2-GiB task; regular Fargate | No redundancy by default |
-| Seven-day RDS automated backups | No tested recovery objective |
-| $100 monthly budget alert | Not a spend cap |
+5. Load production settings and inspect or deploy:
 
-Assess load, availability, Multi-AZ, task count, networking, retention and RTO/RPO before relying on production. RDS is encrypted, deletion-protected and configured for a final snapshot, but snapshots, keys and recovery are not tested. See [Back up and restore](backup-and-restore.md) before destructive changes.
+   ```sh
+   set -a; . environments/production.env; set +a
+   backstage-aws env status
+   backstage-aws env up --scan --approve
+   ```
+
+   Expected: `env status` exits 0 with JSON `result.namespace`, `result.url`, `result.service_status`, `result.running_count`, `result.image_digest`, and `result.ready`. `env up --scan` exits 0 with `result.namespace`, `result.url`, `result.image_digest`, `result.timings`, and `result.comment_url`. Locally, an image build needs Docker/Buildx or Podman; a previously built image can be selected with `--digest sha256:<digest>`. The root `up` command does not request the production scan, so use the scanned workflow/command for production deploys.
+6. Before a destructive change, export production data to a new local file:
+
+   ```sh
+   set -a; . environments/production.env; set +a
+   install -d -m 700 /secure
+   backup_dir="$(mktemp -d /secure/backstage-aws-dump.XXXXXX)"
+   backstage-aws db dump --file "$backup_dir/production.dump" --approve
+   ```
+
+   Expected: exit 0 and JSON `result.bucket`, `result.key`, `result.database`, and `result.file`. This is a custom-format dump of the production namespace without owner or ACL entries; it is on-demand, not continuous. To use it as the seed for future namespaces, run:
+
+   ```sh
+   set -a; . environments/production.env; set +a
+   backstage-aws seed --file "$backup_dir/production.dump" --approve
+   ```
+
+   Expected: exit 0 with JSON `result.bucket`, `result.key`, `result.operation_id`, and `result.resumed`. It replaces the shared seed for future namespaces only; it does not restore production or any existing namespace.
+7. RDS has encrypted storage, deletion protection, seven-day automated backups, and a final-snapshot request; state is versioned in a separate encrypted bucket. Preserve the state bucket, both KMS keys, snapshots, and secrets. The CLI has no RDS restore/cutover, state restore, or secret export/import command. A healthy ECS/ALB target does not verify DNS, sign-in, or application behavior. See [Back up and restore](backup-and-restore.md) before relying on recovery.

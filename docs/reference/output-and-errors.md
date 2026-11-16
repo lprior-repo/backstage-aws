@@ -4,7 +4,7 @@
 |---|---|
 | stdout | One newline-terminated JSON envelope per parsed command, success or failure. `--help`/`--version` are plain text. Parse errors use `command:"unknown"`. |
 | stderr | Step JSONL and child-process output. Step events: `event:"step"`, `name`, `status` (`started`, `ok`, `failed`), `elapsed_ms`. |
-| `$GITHUB_STEP_SUMMARY` | When set, append a step timing Markdown table. |
+| `$GITHUB_STEP_SUMMARY` | After a successful `env up`, append its step-timing Markdown table when set. |
 
 ```json
 {"ok":true,"command":"env up","result":{}}
@@ -27,4 +27,4 @@ Blocked `setup` adds `error.details`: ordered `checks`, one `next` action, `resu
 
 Exit 5 is not completion: inspect remote state before retrying. Local child-process timeout is exit 4. Preserve error JSON and stderr when reporting.
 
-Mutations without `--approve` or `BACKSTAGE_AWS_APPROVE=true` stop before changing state and return exit 3 / `APPROVAL_REQUIRED`; commands never prompt.
+Remote AWS or GitHub mutations without `--approve` or `BACKSTAGE_AWS_APPROVE=true` stop before changing remote state and return exit 3 / `APPROVAL_REQUIRED`; commands never prompt. Local project changes do not require approval.

@@ -1,3 +1,4 @@
+use crate::container::ContainerEngine;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ const ENV_MAX_CRITICAL: &str = "BACKSTAGE_AWS_MAX_CRITICAL_FINDINGS";
 const ENV_PLUGIN_SECRETS: &str = "BACKSTAGE_AWS_PLUGIN_SECRETS";
 const ENV_OIDC_PROVIDER: &str = "BACKSTAGE_AWS_GITHUB_OIDC_PROVIDER_ARN";
 const ENV_TERRAFORM: &str = "BACKSTAGE_AWS_TERRAFORM";
+const ENV_CONTAINER_ENGINE: &str = "BACKSTAGE_AWS_CONTAINER_ENGINE";
 const ENV_APPROVE: &str = "BACKSTAGE_AWS_APPROVE";
 const ENV_HOSTNAME: &str = "BACKSTAGE_AWS_HOSTNAME";
 const ENV_NAMESPACE: &str = "BACKSTAGE_AWS_NAMESPACE";
@@ -38,6 +40,9 @@ pub(crate) struct Settings {
     /// The project directory that `init` created.
     #[arg(long, env=ENV_PROJECT, default_value=".", global=true)]
     pub(crate) project: PathBuf,
+    /// Container command used for local development and image builds.
+    #[arg(long, env=ENV_CONTAINER_ENGINE, default_value_t=ContainerEngine::Docker, value_enum, global=true)]
+    pub(crate) container_engine: ContainerEngine,
     // The deployment's identity. Commands except `setup` and `check` need these;
     // they default to blank so that validation, not argument parsing, reports
     // the missing ones.
@@ -50,10 +55,10 @@ pub(crate) struct Settings {
     /// Required. The AWS region, such as `us-east-1`.
     #[arg(long, env=ENV_REGION, default_value="", global=true)]
     pub(crate) aws_region: String,
-    /// Required. The domain environments are served under, such as `preview.example.com`.
+    /// Optional. The domain environments are served under, such as `preview.example.com`. Leave empty, together with the zone ID, for domain-free plain-HTTP mode.
     #[arg(long, env=ENV_DOMAIN, default_value="", global=true)]
     pub(crate) domain_name: String,
-    /// Required. The Route 53 public hosted zone that holds the domain's records.
+    /// Optional. The Route 53 public hosted zone that holds the domain's records; set it exactly when the domain is set.
     #[arg(long, env=ENV_ZONE, default_value="", global=true)]
     pub(crate) route53_zone_id: String,
     /// Required. The project's GitHub repository as `owner/name`.
@@ -123,10 +128,17 @@ pub(crate) struct Settings {
 }
 impl Settings {
     /// The Terraform executable: `--terraform`, else `terraform` on `PATH`.
+    /// Explicit relative paths are anchored at the invocation directory so
+    /// Terraform can be launched after changing into a stack directory.
     pub(crate) fn terraform_path(&self) -> PathBuf {
-        self.terraform
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("terraform"))
+        let configured = self
+            .terraform
+            .as_ref()
+            .map_or_else(|| PathBuf::from("terraform"), Clone::clone);
+        if configured.is_absolute() || configured.components().count() == 1 {
+            return configured;
+        }
+        std::env::current_dir().map_or_else(|_| configured.clone(), |cwd| cwd.join(&configured))
     }
 }
 #[derive(Args, Clone, Debug)]

@@ -10,5 +10,38 @@ if [ "$1" = version ]; then
   echo "{\"terraform_version\":\"${0##*-}\"}"
   exit 0
 fi
+if [ "$1" = init ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      -backend-config=path=*)
+        grep -q 'backend "local"' backend.local.tf || exit 1
+        printf '%s' "${arg#-backend-config=path=}" > .fixture-state-path ;;
+    esac
+  done
+  if [ "$(basename "$PWD")" = bootstrap ] && grep -q 'backend "s3"' backend.local.tf; then
+    test -f ../../bootstrap-encrypted || exit 1
+  fi
+  for arg in "$@"; do
+    if [ "$arg" = -migrate-state ]; then
+      grep -q 'backend "s3"' backend.local.tf || exit 1
+      test ! -f ../../fail-migrate || exit 1
+      state=$(cat .fixture-state-path) || exit 1
+      cp "$state" ../../bootstrap-remote-state || exit 1
+    fi
+  done
+fi
+if [ "$1" = plan ] && [ -f terraform.tfvars ]; then
+  cp terraform.tfvars "../../$(basename "$PWD")-planned.tfvars"
+fi
+if [ "$1" = apply ] && [ -f ../../fail-apply ]; then
+  printf '{"version":4,"lineage":"errored","serial":1,"errored":true}' > errored.tfstate
+  chmod 600 errored.tfstate
+fi
+if [ "$1" = apply ] && [ -f ../../bootstrap-state ]; then
+  state=terraform.tfstate
+  if [ -f .fixture-state-path ]; then state=$(cat .fixture-state-path); fi
+  cp ../../bootstrap-state "$state"
+  chmod 600 "$state"
+fi
 echo "$(basename "$PWD"): $*" >> ../../calls.log
 [ ! -e "../../fail-$1" ]

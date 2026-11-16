@@ -1,0 +1,36 @@
+# Local development only: `backstage-aws dev` starts Docker PostgreSQL and
+# copies this file to the gitignored app-config.local.yaml when missing.
+# No AWS credentials or GitHub token are required.
+
+app:
+  baseUrl: http://localhost:3000
+
+backend:
+  baseUrl: http://localhost:7007
+  listen:
+    host: 127.0.0.1
+  database:
+    client: pg
+    pluginDivisionMode: schema
+    connection:
+      host: 127.0.0.1
+      port: 54320
+      user: postgres
+      password: backstage-local-only
+      database: backstage
+      ssl: false
+
+# Guest sign-in is allowed in development mode only. It receives ordinary
+# catalog/template read permissions, never operator privileges.
+auth:
+  providers:
+    guest: {}
+
+catalog:
+  locations:
+    - type: file
+      target: ../../catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    - type: file
+      target: ../../catalog/entities.yaml

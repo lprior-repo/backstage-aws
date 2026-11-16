@@ -74,7 +74,7 @@ run "base_security_and_outputs" {
     error_message = "Tasks need HTTPS and database egress, and the load balancer needs egress to the application port; Terraform removes the default egress rule."
   }
   assert {
-    condition     = aws_lb_listener.https.default_action[0].type == "fixed-response" && aws_lb_listener.https.default_action[0].fixed_response[0].status_code == "404"
+    condition     = aws_lb_listener.https[0].default_action[0].type == "fixed-response" && aws_lb_listener.https[0].default_action[0].fixed_response[0].status_code == "404"
     error_message = "HTTPS listener must default to a fixed 404."
   }
   assert {
@@ -100,6 +100,18 @@ run "base_security_and_outputs" {
   assert {
     condition     = !strcontains(local.application_execution_secrets_policy, aws_db_instance.database.master_user_secret[0].secret_arn)
     error_message = "Application execution role must not read the master secret."
+  }
+  # The portal must not be able to read the lifecycle credential, so an
+  # attacker-controlled portal revision cannot clone or drop databases.
+  assert {
+    condition     = !strcontains(local.application_execution_secrets_policy, aws_secretsmanager_secret.db_lifecycle.arn)
+    error_message = "Application execution role must not read the lifecycle credential."
+  }
+  # The portal secret policy must not use a broad wildcard that would include
+  # the lifecycle or master secrets.
+  assert {
+    condition     = !strcontains(local.application_execution_secrets_policy, "secret/${var.name}/database-application") && !strcontains(local.application_execution_secrets_policy, "secret:${var.name}/*")
+    error_message = "Portal secret policy must use exact ARNs, not a project-wide wildcard."
   }
   assert {
     condition = alltrue([for role in [

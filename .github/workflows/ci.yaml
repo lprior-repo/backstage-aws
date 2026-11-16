@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,6 +24,11 @@ jobs:
         with:
           terraform_version: 1.17.2
           terraform_wrapper: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Install native offline acceptance prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++ pkg-config libsecret-1-dev postgresql-16
       - name: Initialize and check generated project offline
         env:
           BACKSTAGE_AWS_NAME: example-portal
@@ -41,4 +46,4 @@ jobs:
           output="$RUNNER_TEMP/backstage-aws-generated-$GITHUB_RUN_ID"
           target/release/backstage-aws init --output "$output"
           cd "$output"
-          "$GITHUB_WORKSPACE/target/release/backstage-aws" check
+          "$GITHUB_WORKSPACE/target/release/backstage-aws" check --runtime --postgres-bin /usr/lib/postgresql/16/bin

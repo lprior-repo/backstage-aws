@@ -84,9 +84,13 @@ fn bad_input_exits_2_with_a_json_error() -> TestResult {
 }
 
 #[test]
-fn every_mutation_without_approval_exits_3_before_doing_anything() -> TestResult {
+fn every_remote_mutation_without_approval_makes_no_changes() -> TestResult {
     let (_dir, terraform) = terraform("1.17.2")?;
-    let mutations: [&[&str]; 10] = [
+    let scratch = tempfile::tempdir()?;
+    let project_flag = format!("--project={}", scratch.path().display());
+    let dump = scratch.path().join("dump");
+    let dump_file = format!("--file={}", dump.display());
+    let mutations: [&[&str]; 11] = [
         &["bootstrap"],
         &["base"],
         &["seed", "--file=/nonexistent"],
@@ -95,17 +99,25 @@ fn every_mutation_without_approval_exits_3_before_doing_anything() -> TestResult
         &["env", "down"],
         &["secrets", "set-identity"],
         &["db", "rotate-password"],
+        &["db", "dump", dump_file.as_str()],
         &["publish"],
         &["up"],
     ];
     for mutation in mutations {
         let mut args = SETTINGS.to_vec();
         args.push(&terraform);
+        args.push(&project_flag);
         args.extend(mutation);
         let refused = run(&args)?;
         assert_eq!(
             failure(&refused),
             (Some(3), Some(false), Some("APPROVAL_REQUIRED")),
+            "{mutation:?}"
+        );
+        assert!(!dump.exists(), "{mutation:?}");
+        assert_eq!(
+            std::fs::read_dir(scratch.path())?.count(),
+            0,
             "{mutation:?}"
         );
     }

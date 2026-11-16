@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid":"ReadSelectedZone","Effect":"Allow","Action":["route53:ListResourceRecordSets","route53:GetHostedZone"],"Resource":${jsonencode(hosted_zone_arn)}},
+    {"Sid":"ChangeOnlyApplicationRecords","Effect":"Allow","Action":"route53:ChangeResourceRecordSets","Resource":${jsonencode(hosted_zone_arn)},"Condition":{"ForAllValues:StringLike":{"route53:ChangeResourceRecordSetsNormalizedRecordNames":[${jsonencode(domain)},${jsonencode(wildcard_domain)}]},"ForAllValues:StringEquals":{"route53:ChangeResourceRecordSetsActions":["CREATE","UPSERT","DELETE"],"route53:ChangeResourceRecordSetsRecordTypes":["A","CNAME"]}}},
+    {"Sid":"ReadChangeStatus","Effect":"Allow","Action":"route53:GetChange","Resource":${jsonencode(change_arn)}},
+    {"Sid":"RequestOnlyDnsValidatedApplicationCertificates","Effect":"Allow","Action":"acm:RequestCertificate","Resource":"*","Condition":{"StringEquals":{"aws:RequestedRegion":${jsonencode(region)},"aws:RequestTag/Project":${jsonencode(project)},"acm:ValidationMethod":"DNS"},"ForAllValues:StringEquals":{"acm:DomainNames":[${jsonencode(domain)},${jsonencode(wildcard_domain)}]}}},
+    {"Sid":"NoPaidExportableCertificates","Effect":"Deny","Action":"acm:RequestCertificate","Resource":"*","Condition":{"StringEquals":{"acm:Export":"ENABLED"}}},
+    {"Sid":"MaintainOwnedCertificates","Effect":"Allow","Action":["acm:DescribeCertificate","acm:DeleteCertificate","acm:ListTagsForCertificate","acm:AddTagsToCertificate","acm:RemoveTagsFromCertificate"],"Resource":${jsonencode(certificate_arn)},"Condition":{"StringEquals":{"aws:ResourceTag/Project":${jsonencode(project)},"aws:RequestedRegion":${jsonencode(region)}}}}
+  ]
+}

@@ -7,7 +7,7 @@
 - Remote mutations require `--approve`. Preserve state/KMS keys; never clear active locks.
 - Short-lived AWS credentials; GitHub OIDC in CI. No GitHub deployment Environments.
 - Separate preview/production accounts; namespaces share a database role. Sanitize seed data.
-- Terraform 1.17.2; Docker Buildx for image builds. CI requires the matching attested CLI release.
+- Terraform 1.17.2; Docker Buildx or Podman (`--container-engine`) for image builds. CI requires the matching attested CLI release.
 - `check --app` validates Terraform and app; `env up/down` handles deployment lifecycle.
 - `db dump` exports a namespace; `seed` restores only the template. Password rotation affects all services.
 - Offline checks are not live AWS, recovery, sign-in, or five-minute startup evidence.

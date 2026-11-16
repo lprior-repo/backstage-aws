@@ -8,6 +8,31 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// Parse CLI flag combinations once; the execution core accepts semantic modes.
+pub(crate) fn check_request<'a>(
+    app: bool,
+    runtime: bool,
+    postgres_bin: Option<&'a std::path::Path>,
+    release_archive: Option<&'a std::path::Path>,
+) -> Result<crate::check::CheckRequest<'a>> {
+    use crate::check::{ApplicationCheck, CheckRequest};
+    let application = match (app, runtime, postgres_bin) {
+        (_, true, postgres_bin) => ApplicationCheck::Runtime { postgres_bin },
+        (_, false, Some(_)) => {
+            return Err(Error::invalid_input("--postgres-bin requires --runtime"));
+        }
+        (true, false, None) => ApplicationCheck::Build,
+        (false, false, None) => ApplicationCheck::None,
+    };
+    match (application, release_archive) {
+        (ApplicationCheck::None, Some(archive)) => Ok(CheckRequest::Release { archive }),
+        (application, release_archive) => Ok(CheckRequest::Project {
+            application,
+            release_archive,
+        }),
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "backstage-aws",
@@ -41,6 +66,15 @@ pub(crate) enum Command {
         /// Also install, typecheck, test, and build the Backstage application.
         #[arg(long)]
         app: bool,
+        /// Rehearse PostgreSQL 16 backup/restore and the running app (implies --app).
+        #[arg(long)]
+        runtime: bool,
+        /// Directory containing PostgreSQL 16 tools, instead of searching PATH.
+        #[arg(long, requires = "runtime")]
+        postgres_bin: Option<PathBuf>,
+        /// Smoke-test a local release archive; does not verify its provenance.
+        #[arg(long)]
+        release_archive: Option<PathBuf>,
     },
     #[command(about = "Check local tools, the AWS identity, and GitHub repository access.")]
     Doctor,
@@ -85,6 +119,21 @@ pub(crate) enum Command {
         #[arg(long)]
         identity_file: Option<PathBuf>,
     },
+    #[command(
+        subcommand,
+        about = "Add, remove and list Backstage plugins without hand-editing the app."
+    )]
+    Plugin(PluginCommand),
+    #[command(
+        subcommand,
+        about = "Read or change app config YAML without losing comments."
+    )]
+    Config(ConfigCommand),
+    #[command(
+        about = "Run Backstage on this machine: local PostgreSQL, dev config and `yarn start`, no AWS.",
+        long_about = "Starts PostgreSQL 16 in Docker Compose with a persistent project-local volume, writes app-config.local.yaml from the example if missing, installs dependencies if needed, and runs the dev server at http://localhost:3000 until Ctrl-C. Needs Node 24.22.1 and Docker Engine with Compose. Stops and removes its containers on exit, preserving database data unless --reset is used. Prints one JSON document when it exits."
+    )]
+    Dev(crate::dev::DevArgs),
 }
 #[derive(Subcommand, Clone, Debug)]
 pub(crate) enum EnvCommand {
@@ -138,6 +187,70 @@ pub(crate) enum DbCommand {
         file: Option<PathBuf>,
     },
 }
+#[derive(Subcommand, Clone, Debug)]
+pub(crate) enum PluginCommand {
+    #[command(about = "List the plugins you can add by name and which are installed. Read-only.")]
+    List,
+    #[command(
+        about = "Add plugins to the app: dependencies, backend registration, config and code, in one step.",
+        long_about = "Edits the project's app/ directory only; nothing is deployed. Name catalog plugins (see `plugin list`) and/or pass any package with --frontend / --backend. Versions come from the app's pinned Backstage release unless given as PKG@VERSION. Every change is computed first and written together, so a refusal leaves the files untouched. Safe to repeat. --install then updates yarn.lock."
+    )]
+    Add(crate::plugin::EditArgs),
+    #[command(
+        about = "Remove plugins added by `plugin add`: dependencies, backend registration, config and code.",
+        long_about = "The inverse of `plugin add`, with the same arguments. Safe to repeat."
+    )]
+    Remove(crate::plugin::EditArgs),
+}
+#[derive(Subcommand, Clone, Debug)]
+pub(crate) enum ConfigCommand {
+    #[command(about = "Print the value at a dotted path in an app config YAML file. Read-only.")]
+    Get {
+        /// Dotted path such as `catalog.providers.github`.
+        path: String,
+        /// Config file inside app/, default app-config.yaml.
+        #[arg(long, default_value = "app-config.yaml")]
+        file: String,
+    },
+    #[command(
+        about = "Set a scalar at a dotted path in an app config YAML file, keeping comments and layout.",
+        long_about = "Creates missing parents. The value is read as a boolean, integer or text (true, 42, hello). Use ${VAR} to read an environment variable at runtime; never write secrets into the file."
+    )]
+    Set {
+        /// Dotted path such as `backend.cors.origin`.
+        path: String,
+        /// The new value.
+        value: String,
+        /// Config file inside app/, default app-config.yaml.
+        #[arg(long, default_value = "app-config.yaml")]
+        file: String,
+    },
+}
+
+impl Command {
+    /// Commands that only touch the local project: no settings, AWS or Terraform.
+    pub(crate) const fn is_project_local(&self) -> bool {
+        matches!(self, Self::Plugin(_) | Self::Config(_) | Self::Dev(_))
+    }
+}
+
+/// Runs a project-local command against `project`'s `app/` directory.
+pub(crate) async fn project_command(settings: &Settings, command: &Command) -> Result<Value> {
+    let project = &settings.project;
+    match command {
+        Command::Plugin(PluginCommand::List) => crate::plugin::list(project),
+        Command::Plugin(PluginCommand::Add(args)) => crate::plugin::add(project, args).await,
+        Command::Plugin(PluginCommand::Remove(args)) => crate::plugin::remove(project, args).await,
+        Command::Config(ConfigCommand::Get { path, file }) => {
+            crate::app_config::get(&project.join("app"), file, path)
+        }
+        Command::Config(ConfigCommand::Set { path, value, file }) => {
+            crate::app_config::set(&project.join("app"), file, path, value)
+        }
+        Command::Dev(args) => crate::dev::run(project, settings.container_engine, args).await,
+        _ => Err(Error::state_failed("not a project-local command")),
+    }
+}
 
 #[cfg(test)]
 #[path = "cli/tests.rs"]
@@ -163,6 +276,12 @@ pub(crate) const fn command_name(command: &Command) -> &'static str {
         Command::Db(DbCommand::RotatePassword) => "db rotate-password",
         Command::Db(DbCommand::Dump { .. }) => "db dump",
         Command::Publish => "publish",
+        Command::Plugin(PluginCommand::List) => "plugin list",
+        Command::Plugin(PluginCommand::Add(_)) => "plugin add",
+        Command::Plugin(PluginCommand::Remove(_)) => "plugin remove",
+        Command::Config(ConfigCommand::Get { .. }) => "config get",
+        Command::Config(ConfigCommand::Set { .. }) => "config set",
+        Command::Dev(_) => "dev",
         Command::Up { .. } => "up",
     }
 }
@@ -171,9 +290,24 @@ pub(crate) async fn dispatch(ctx: &Ctx, command: &Command) -> Result<Value> {
     match command {
         Command::Setup(args) => crate::onboarding::run(&ctx.settings.settings, args).await,
         Command::Init { output } => value(crate::template::render_template(&ctx.settings, output)?),
-        Command::Check { app } => {
-            value(crate::check::check(&ctx.project_dir, &ctx.terraform, *app).await?)
-        }
+        Command::Check {
+            app,
+            runtime,
+            postgres_bin,
+            release_archive,
+        } => value(
+            crate::check::check(
+                &ctx.project_dir,
+                &ctx.terraform,
+                check_request(
+                    *app,
+                    *runtime,
+                    postgres_bin.as_deref(),
+                    release_archive.as_deref(),
+                )?,
+            )
+            .await?,
+        ),
         Command::Doctor => value(ops::doctor(ctx).await?),
         Command::Bootstrap => value(ops::up::bootstrap(ctx).await?),
         Command::Base => value(ops::up::base(ctx).await?),
@@ -191,6 +325,9 @@ pub(crate) async fn dispatch(ctx: &Ctx, command: &Command) -> Result<Value> {
         Command::Db(DbCommand::RotatePassword) => value(Box::pin(ops::rotate_password(ctx)).await?),
         Command::Db(DbCommand::Dump { file }) => value(ops::dump(ctx, file.as_deref()).await?),
         Command::Publish => value(ops::publish(ctx).await?),
+        Command::Plugin(_) | Command::Config(_) | Command::Dev(_) => {
+            project_command(&ctx.settings.settings, command).await
+        }
         Command::Up {
             seed_file,
             identity_file,

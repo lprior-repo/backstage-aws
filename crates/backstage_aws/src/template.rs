@@ -2,12 +2,15 @@
 use crate::{
     error::{Error, Result},
     settings::ValidatedSettings,
+    terraform::generate,
 };
 use include_dir::{Dir, DirEntry, include_dir};
 use serde::Serialize;
 use std::{fs, path::Path};
 
-static TEMPLATE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../template");
+// `build.rs` stages the copy of `template/` that the template's own ignore
+// rules keep; embedding the source directory would ship local build output.
+static TEMPLATE: Dir<'_> = include_dir!("$OUT_DIR/template");
 const MARKER: &str = "__BACKSTAGE_AWS_";
 
 #[derive(Serialize)]
@@ -29,13 +32,22 @@ pub(crate) fn write_settings_file(settings: &ValidatedSettings, project: &Path) 
 
 /// Writes the template into a new directory, substituting project values.
 pub(crate) fn render_template(settings: &ValidatedSettings, output: &Path) -> Result<InitResult> {
-    if output.exists() {
-        return Err(Error::invalid_input(format!(
-            "{} already exists; `init` only writes to a new directory",
-            output.display()
-        )));
-    }
     let failed = |error: std::io::Error| Error::state_failed(error.to_string());
+    if let Some(parent) = output.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).map_err(failed)?;
+    }
+    // Claim the destination atomically; an existence check followed by
+    // create_dir_all could let concurrent init calls overwrite each other.
+    fs::create_dir(output).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            Error::invalid_input(format!(
+                "{} already exists; `init` only writes to a new directory",
+                output.display()
+            ))
+        } else {
+            failed(error)
+        }
+    })?;
     let mut files = 0_usize;
     let mut pending = vec![&TEMPLATE];
     while let Some(directory) = pending.pop() {
@@ -44,7 +56,15 @@ pub(crate) fn render_template(settings: &ValidatedSettings, output: &Path) -> Re
             match entry {
                 DirEntry::Dir(child) => pending.push(child),
                 DirEntry::File(file) => {
-                    let contents = render_contents(settings, file.contents())?;
+                    let path = file.path();
+                    let contents = if matches!(
+                        path.extension().and_then(std::ffi::OsStr::to_str),
+                        Some("tf" | "hcl")
+                    ) {
+                        generate::blueprint(path, file.contents())?
+                    } else {
+                        render_contents(settings, file.contents())?
+                    };
                     fs::write(output.join(file.path()), contents).map_err(failed)?;
                     files = files.saturating_add(1);
                 }
@@ -70,6 +90,10 @@ fn render_contents(settings: &ValidatedSettings, contents: &[u8]) -> Result<Vec<
             &settings.owner_github_id.0.to_string(),
         )
         .replace("__BACKSTAGE_AWS_CLI_VERSION__", env!("CARGO_PKG_VERSION"))
+        .replace(
+            "__BACKSTAGE_AWS_REPOSITORY__",
+            &settings.settings.github_repository,
+        )
         .replace(
             "__BACKSTAGE_AWS_CLI_REPOSITORY__",
             "lprior-repo/backstage-aws",
@@ -151,6 +175,48 @@ mod tests {
         let refused = render_template(&settings, temp.path()).map_err(|error| error.code());
         assert_eq!(refused.err(), Some("INVALID_INPUT"));
         assert_eq!(files_under(temp.path())?.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn local_example_registers_catalog_from_disk_without_github() -> TestResult {
+        let temp = tempfile::tempdir()?;
+        let output = temp.path().join("generated");
+        let settings = Settings::sample(output.clone()).validate()?;
+        render_template(&settings, &output)?;
+        let example = fs::read_to_string(output.join("app/app-config.local.example.yaml"))?;
+        assert!(
+            example.contains("target: ../../catalog/entities.yaml"),
+            "{example}"
+        );
+        assert!(
+            example.contains("target: ../../catalog/org.yaml"),
+            "{example}"
+        );
+        assert!(!example.contains("https://github.com/"), "{example}");
+        assert!(!example.contains("GITHUB_TOKEN"), "{example}");
+        let base = fs::read_to_string(output.join("app/app-config.yaml"))?;
+        assert!(
+            !base.trim_end().ends_with("- type: file"),
+            "a catalog location without a target must not be generated"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn init_refuses_a_dangling_symlink_without_creating_its_target() -> TestResult {
+        let temp = tempfile::tempdir()?;
+        let output = temp.path().join("project");
+        let target = temp.path().join("missing-target");
+        std::os::unix::fs::symlink(&target, &output)?;
+        let settings = Settings::sample(output.clone()).validate()?;
+        let refused = render_template(&settings, &output);
+        assert_eq!(
+            refused.map_err(|error| error.code()).err(),
+            Some("INVALID_INPUT")
+        );
+        assert_eq!(fs::read_link(&output)?, target);
+        assert!(!target.exists());
         Ok(())
     }
 

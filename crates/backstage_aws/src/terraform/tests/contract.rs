@@ -24,6 +24,7 @@ fn the_stacks_declare_every_output_read_from_them() {
         "db_admin_rotate_task_definition_arn",
         "db_admin_seed_task_definition_arn",
         "db_admin_seed_restore_task_definition_arn",
+        "db_admin_dump_task_definition_arn",
         "db_admin_network_configuration",
     ];
     let env_reads_from_base = [ENV_MAIN, ENV_OUTPUTS].into_iter().flat_map(|source| {

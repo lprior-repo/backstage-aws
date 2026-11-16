@@ -1,5 +1,8 @@
 locals {
   base = data.terraform_remote_state.base.outputs
+  # The base stack decides the scheme: https with a domain, http without one.
+  url_scheme = try(local.base.url_scheme, "https")
+  url        = "${local.url_scheme}://${var.hostname}"
   # Rule priorities must be unique on the listener. Pull request previews take
   # theirs from the pull request number; any other namespace hashes into a
   # separate range.
@@ -81,16 +84,20 @@ resource "aws_ecs_task_definition" "env" {
     user         = "1000:1000"
     portMappings = [{ containerPort = 7007, protocol = "tcp", name = "http" }]
     command      = ["node", "packages/backend", "--config", "app-config.yaml", "--config", "app-config.production.yaml", "--config", "app-config.auth-${var.auth_mode}.yaml"]
-    environment = [
+    environment = concat([
       { name = "NODE_ENV", value = "production" },
-      { name = "APP_BASE_URL", value = "https://${var.hostname}" },
-      { name = "BACKEND_BASE_URL", value = "https://${var.hostname}" },
+      { name = "APP_BASE_URL", value = local.url },
+      { name = "BACKEND_BASE_URL", value = local.url },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "POSTGRES_HOST", value = local.base.database_endpoint },
       { name = "POSTGRES_PORT", value = "5432" },
       { name = "POSTGRES_DB", value = var.database_name },
       { name = "PGSSLROOTCERT", value = "/app/certs/aws-rds-global-bundle.pem" }
-    ]
+      ], local.url_scheme == "http" ? [
+      # Backstage/Helmet upgrades subresources to HTTPS by default. HTTP-only
+      # sandboxes have no TLS listener; keep all other CSP directives intact.
+      { name = "APP_CONFIG_backend_csp_upgradeInsecureRequests", value = "false" }
+    ] : [])
     secrets = local.portal_secrets
     logConfiguration = {
       logDriver = "awslogs"

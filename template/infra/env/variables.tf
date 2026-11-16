@@ -31,17 +31,23 @@ variable "namespace" {
 }
 
 variable "hostname" {
-  type = string
+  type        = string
+  description = "With a domain: the apex or one label below it. Without one: a name ending in .internal that only the Host header carries."
   validation {
-    condition     = length(var.hostname) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$", var.hostname)) && (var.hostname == var.domain_name || (endswith(var.hostname, ".${var.domain_name}") && length(split(".", var.hostname)) == length(split(".", var.domain_name)) + 1))
-    error_message = "Hostname must equal the apex or have exactly one extra label."
+    condition = length(var.hostname) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$", var.hostname)) && (
+      var.domain_name == ""
+      ? endswith(var.hostname, ".internal")
+      : (var.hostname == var.domain_name || (endswith(var.hostname, ".${var.domain_name}") && length(split(".", var.hostname)) == length(split(".", var.domain_name)) + 1))
+    )
+    error_message = "Hostname must equal the apex or have exactly one extra label; without a domain it must end in .internal."
   }
 }
 
 variable "domain_name" {
-  type = string
+  type        = string
+  description = "Lowercase DNS name; empty in the domain-free HTTP mode."
   validation {
-    condition     = length(var.domain_name) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.domain_name))
+    condition     = var.domain_name == "" || (length(var.domain_name) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.domain_name)))
     error_message = "Invalid lowercase DNS name."
   }
 }

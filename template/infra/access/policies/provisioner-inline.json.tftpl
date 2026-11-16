@@ -1,0 +1,317 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AccountDiscovery",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity",
+        "iam:GetAccountSummary",
+        "iam:GetAccountPasswordPolicy",
+        "iam:ListOpenIDConnectProviders",
+        "organizations:DescribeOrganization",
+        "sso:ListInstances",
+        "s3:GetAccountPublicAccessBlock"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ScopedRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-execution")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-flow-logs")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-github-deploy")}
+      ]
+    },
+    {
+      "Sid": "CreateOnlyBoundedRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-execution")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-flow-logs")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-github-deploy")}
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": ${jsonencode(boundary_arn)}
+        }
+      }
+    },
+    {
+      "Sid": "PassEcsRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-task")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-admin-execution")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PassFlowLogRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-flow-logs")},
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "vpc-flow-logs.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "RequiredServiceLinkedRoles",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/aws-service-role/elasticloadbalancing.amazonaws.com/AWSServiceRoleForElasticLoadBalancing")},
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/aws-service-role/access-analyzer.amazonaws.com/AWSServiceRoleForAccessAnalyzer")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "ecs.amazonaws.com",
+            "rds.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com",
+            "access-analyzer.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "FixedGitHubOidcProvider",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateOpenIDConnectProvider",
+        "iam:GetOpenIDConnectProvider",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:AddClientIDToOpenIDConnectProvider",
+        "iam:RemoveClientIDFromOpenIDConnectProvider",
+        "iam:UpdateOpenIDConnectProviderThumbprint",
+        "iam:TagOpenIDConnectProvider",
+        "iam:UntagOpenIDConnectProvider",
+        "iam:ListOpenIDConnectProviderTags"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:iam::${account_id}:oidc-provider/token.actions.githubusercontent.com")}
+    },
+    {
+      "Sid": "NoBoundaryRemoval",
+      "Effect": "Deny",
+      "Action": "iam:DeleteRolePermissionsBoundary",
+      "Resource": ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-*")}
+    },
+    {
+      "Sid": "NoBoundaryPolicyEditing",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
+      ],
+      "Resource": [
+        ${jsonencode(boundary_arn)},
+        ${jsonencode("arn:${partition}:iam::${account_id}:policy/${name}-provisioner-*")}
+      ]
+    },
+    {
+      "Sid": "ProjectCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster",
+        "ecs:DeleteCluster",
+        "ecs:DescribeClusters",
+        "ecs:PutClusterCapacityProviders",
+        "ecs:UpdateClusterSettings",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+    },
+    {
+      "Sid": "ProjectServices",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateService",
+        "ecs:DeleteService",
+        "ecs:DescribeServices",
+        "ecs:UpdateService",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:service/${name}-cluster/${name}-*")}
+    },
+    {
+      "Sid": "ProjectDefinitions",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterTaskDefinition",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task-definition/${name}-*:*")}
+    },
+    {
+      "Sid": "TagOwnedCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:TagResource",
+        "ecs:UntagResource"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+    },
+    {
+      "Sid": "RunProjectDatabaseJobs",
+      "Effect": "Allow",
+      "Action": "ecs:RunTask",
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task-definition/${name}-db-admin-*:*")},
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+        }
+      }
+    },
+    {
+      "Sid": "ProjectTaskLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks",
+        "ecs:StopTask",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:task/${name}-cluster/*")}
+    },
+    {
+      "Sid": "ListProjectTasks",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListTasks",
+        "ecs:ListServices"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": ${jsonencode("arn:${partition}:ecs:${region}:${account_id}:cluster/${name}-cluster")}
+        }
+      }
+    },
+    {
+      "Sid": "RegionalUnscopedEcsApis",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListClusters",
+        "ecs:ListTaskDefinitions",
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": ${jsonencode(region)}
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:internet-gateway/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:subnet/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:route-table/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:security-group/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:security-group-rule/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:instance/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:volume/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:network-interface/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:elastic-ip/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc-flow-log/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:natgateway/*")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": ${jsonencode(name)},
+          "ec2:Region": ${jsonencode(region)}
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Project",
+            "Environment",
+            "ManagedBy"
+          ]
+        },
+        "StringEqualsIfExists": {
+          "aws:RequestTag/Project": ${jsonencode(name)}
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:DeleteTags",
+      "Resource": [
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:internet-gateway/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:subnet/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:route-table/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:security-group/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:security-group-rule/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:instance/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:volume/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:network-interface/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:elastic-ip/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc-flow-log/*")},
+        ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:natgateway/*")}
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": ${jsonencode(name)},
+          "ec2:Region": ${jsonencode(region)}
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Environment",
+            "ManagedBy"
+          ]
+        }
+      }
+    }
+  ]
+}

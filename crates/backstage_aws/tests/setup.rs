@@ -20,7 +20,7 @@ fn setup(aws: &Path, extra: &[&str]) -> Result<(Option<i32>, Value), Box<dyn Err
 
 fn fake_aws(path: &Path, response: &str, exit: u8) -> TestResult {
     let body = format!(
-        "#!/bin/sh\nif [ \"$1\" = '--version' ]; then echo 'aws-cli/2.40.3 Python/3 Linux'; exit 0; fi\nif [ {exit} -eq 0 ]; then printf '%s\\n' '{response}'; else printf '%s\\n' '{response}' >&2; fi\nexit {exit}\n"
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"${{0%/*}}/aws-arguments\"\nif [ \"$1\" = '--version' ]; then echo 'aws-cli/2.40.3 Python/3 Linux'; exit 0; fi\nif [ {exit} -eq 0 ]; then printf '%s\\n' '{response}'; else printf '%s\\n' '{response}' >&2; fi\nexit {exit}\n"
     );
     std::fs::write(path.with_file_name("aws-response.sh"), body)?;
     if !path.exists() {
@@ -68,7 +68,6 @@ fn resume_rediscovers_credentials_and_rejects_a_changed_account() -> TestResult 
         .pointer("/error/details/resume")
         .and_then(Value::as_array)
         .ok_or("missing resume argv")?;
-    assert!(resume.iter().any(|value| value == "sandbox"));
     assert_eq!(
         result.pointer("/error/details/checks/1/stage"),
         Some(&Value::from("credentials"))
@@ -79,6 +78,8 @@ fn resume_rediscovers_credentials_and_rejects_a_changed_account() -> TestResult 
         r#"{"Account":"999999999999","Arn":"arn:aws:sts::999999999999:assumed-role/Developer/session","UserId":"AROA:session"}"#,
         0,
     )?;
+    let argument_log = directory.path().join("aws-arguments");
+    std::fs::write(&argument_log, "")?;
     let argv = resume
         .iter()
         .skip(1)
@@ -88,6 +89,14 @@ fn resume_rediscovers_credentials_and_rejects_a_changed_account() -> TestResult 
     let replay = Command::new(BINARY).env_clear().args(argv).output()?;
     let exit = replay.status.code();
     let result: Value = serde_json::from_slice(&replay.stdout)?;
+    let arguments = std::fs::read_to_string(argument_log)?;
+    let arguments = arguments.lines().collect::<Vec<_>>();
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair == ["--profile", "sandbox"]),
+        "resumption must rediscover credentials using the selected profile"
+    );
     // Then discovery advances past credentials, but never accepts the wrong account.
     assert_eq!(exit, Some(3));
     assert_eq!(
@@ -115,9 +124,9 @@ fn malformed_success_is_an_external_failure_not_a_setup_instruction() -> TestRes
     let (exit, result) = setup(&aws, &[])?;
     // Then it fails closed, without inventing missing credentials or account state.
     assert_eq!(exit, Some(4));
-    assert_ne!(
+    assert_eq!(
         result.pointer("/error/code"),
-        Some(&Value::from("SETUP_BLOCKED"))
+        Some(&Value::from("STATE_FAILED"))
     );
     assert_eq!(result.get("ok"), Some(&Value::Bool(false)));
     Ok(())
@@ -142,8 +151,10 @@ fn unknown_aws_failure_does_not_expose_raw_diagnostics() -> TestResult {
     let document: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(output.status.code(), Some(4));
     assert_eq!(document.get("ok"), Some(&Value::Bool(false)));
-    assert!(!String::from_utf8(output.stdout)?.contains("PRIVATE_DIAGNOSTIC_123"));
-    assert!(!String::from_utf8(output.stderr)?.contains("PRIVATE_DIAGNOSTIC_123"));
+    for diagnostic in ["PRIVATE_DIAGNOSTIC_123", "private detail"] {
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(diagnostic));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(diagnostic));
+    }
     Ok(())
 }
 

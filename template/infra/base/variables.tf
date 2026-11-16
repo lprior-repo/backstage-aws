@@ -34,18 +34,20 @@ variable "environment" {
 }
 
 variable "domain_name" {
-  type = string
+  type        = string
+  description = "Lowercase DNS apex. Empty, together with an empty route53_zone_id, selects the domain-free HTTP mode."
   validation {
-    condition     = length(var.domain_name) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.domain_name))
+    condition     = var.domain_name == "" || (length(var.domain_name) <= 253 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.domain_name)))
     error_message = "Invalid lowercase DNS apex."
   }
 }
 
 variable "route53_zone_id" {
-  type = string
+  type        = string
+  description = "Public hosted zone of domain_name. Empty exactly when domain_name is empty."
   validation {
-    condition     = can(regex("^Z[A-Z0-9]{5,32}$", var.route53_zone_id))
-    error_message = "Invalid Route 53 zone ID."
+    condition     = var.route53_zone_id == "" ? var.domain_name == "" : (var.domain_name != "" && can(regex("^Z[A-Z0-9]{5,32}$", var.route53_zone_id)))
+    error_message = "Set domain_name and a valid Route 53 zone ID together, or leave both empty."
   }
 }
 

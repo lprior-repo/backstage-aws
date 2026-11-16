@@ -1,6 +1,7 @@
 //! Preflight for an operator workstation: tools, AWS identity, GitHub
 //! permission. Changes nothing.
 use crate::{
+    container::ContainerEngine,
     ctx::Ctx,
     error::{Error, Result},
     github, process, terraform,
@@ -18,12 +19,17 @@ pub(crate) struct DoctorResult {
 
 pub(crate) async fn doctor(ctx: &Ctx) -> Result<DoctorResult> {
     terraform::verify_version(&ctx.terraform).await?;
+    let engine = ctx.settings.settings.container_engine;
+    let engine_args: &[&str] = match engine {
+        ContainerEngine::Docker => &["buildx", "version"],
+        ContainerEngine::Podman => &["info"],
+    };
     for (tool, args) in [
-        ("docker", ["buildx", "version"]),
-        ("git", ["version", "--build-options"]),
+        (engine.program(), engine_args),
+        ("git", &["version", "--build-options"]),
     ] {
         let limit = Duration::from_secs(20);
-        process::capture(OsStr::new(tool), &args, Path::new("."), limit)
+        process::capture(OsStr::new(tool), args, Path::new("."), limit)
             .await
             .map_err(|_| {
                 Error::precondition_failed(format!("`{tool} {}` does not run", args.join(" ")))

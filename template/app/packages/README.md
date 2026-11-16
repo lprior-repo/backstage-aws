@@ -1,9 +1,3 @@
-# The Packages Folder
+# Packages
 
-This is where your own applications and centrally managed libraries live, each
-in a separate folder of its own.
-
-From the start there's an `app` folder (for the frontend) and a `backend` folder
-(for the Node backend), but you can also add more modules in here that house
-your core additions and adaptations, such as themes, common React component
-libraries, utilities, and similar.
+Each folder here is a Yarn workspace package. `app/` contains the frontend and `backend/` contains the Node.js backend. Add shared libraries or other modules in their own folders under `packages/`; the root workspace includes `packages/*`.

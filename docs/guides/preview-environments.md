@@ -1,41 +1,69 @@
 # Preview environments
 
-| Shared per preview account | Per PR |
-| --- | --- |
-| VPC, ALB, RDS, ECR, seed DB | Service, database, Terraform stack |
+Each namespace has its own service, database, and Terraform stack. Namespaces share the preview account's VPC, ALB, RDS instance, ECR repository, seed database, and application database role; namespaces are not security boundaries. The default namespace for PR 42 is `pr-42`, unless `BACKSTAGE_AWS_NAMESPACE` overrides it.
 
-The namespace is `pr-<number>` unless `BACKSTAGE_AWS_NAMESPACE` overrides it. A new namespace clones `seed` once; redeploys preserve its database.
+Every successful `backstage-aws` command exits 0 and prints one JSON document. Exit 2 means invalid input, 3 blocked/precondition, 4 external or state failure, and 5 timeout; remote work may continue after exit 5.
 
-## GitHub Actions lifecycle
+## Set up and publish
 
-`preview.yml` deploys opened, updated and reopened same-repository PRs. It checks out the PR **merge revision**, loads `environments/preview.env`, assumes the deploy role with GitHub OIDC and runs `env up --approve`. The CLI builds/pushes the image, clones the DB if absent, applies Terraform, waits for ECS/ALB health and updates the PR comment. Forks are excluded.
+1. For a fresh generated project, set the required `BACKSTAGE_AWS_*` project/account/DNS/repository settings and AWS credentials for the preview account. Review the generated files before running:
 
-On close, a trusted `pull_request_target` job checks out the base branch and runs `env down`; it never executes PR code. Up/down share a per-PR concurrency group and do not cancel active applies.
+   ```sh
+   GITHUB_TOKEN="$(gh auth token)" backstage-aws up --approve
+   ```
 
-## Inspect or operate
+   Expected: exit 0 and JSON `ok:true`, `command:"up"`. `result` contains `doctor`, `bootstrap`, `base`, `seed`, `environment`, and `publish`; bootstrap reports `state_migrated`, `settings_file`, and `deploy_role_arn`; `environment` reports `namespace`, `url`, `image_digest`, `timings`, and `comment_url`; `publish` reports `repository`, `created`, and `commit`. `up` applies the initial environment and then publishes the current checkout to `main`. The final publish requires a GitHub token with repository-admin access and may fail after AWS resources already exist.
+2. If the project is already provisioned but has not been published, inspect the checkout, load its reviewed settings, and publish:
 
-```sh
-set -a; . environments/preview.env; set +a
-backstage-aws env list
-backstage-aws env status --pull-request 42
-GITHUB_TOKEN="$(gh auth token)" backstage-aws env up --pull-request 42 --approve
-```
+   ```sh
+   git status --short
+   set -a; . environments/preview.env; set +a
+   GITHUB_TOKEN="$(gh auth token)" backstage-aws publish --approve
+   ```
 
-`--pull-request 42` selects `pr-42`; with `GITHUB_TOKEN`, the CLI creates/updates its GitHub comment. Without a token, deploy still returns the URL in JSON. `status` reports URL, image and readiness—not sign-in or application behavior. Settings are committed non-secret configuration; credentials are separate.
+   Expected: `git status` exits 0; `publish` exits 0 and returns JSON `result.repository`, `result.created`, and `result.commit`. `publish` stages all checkout changes, commits if dirty, and pushes the checked-out `HEAD` to `main`; review all changes first. Do not run it after `up` has already published.
 
+## Deploy and inspect a PR
 
-## Defaults
+3. The generated `preview.yml` deploys same-repository PRs on opened, synchronize, and reopened events. It checks out the PR merge revision, loads `environments/preview.env`, assumes `<name>-github-deploy` through GitHub OIDC, and runs `env up --approve`. On close, a `pull_request_target` job checks out only the base branch and runs `env down`; it does not execute PR code. Both jobs serialize by PR without cancelling active operations. Fork PRs are excluded; no GitHub Deployment Environment is used.
+4. To list active namespaces and inspect PR 42:
 
-| Setting | Default | Trade-off |
-| --- | --- | --- |
-| NAT gateways | 0 | Tasks use public subnet addresses; security groups admit inbound app traffic only from ALB. DB has no internet route. |
-| RDS | `db.t4g.micro`, 20 GiB gp3 | Shared capacity and limited connections |
-| ECS task | 1 vCPU, 2 GiB | One task per namespace |
-| Fargate Spot | On except environment `production` | Reclaimable, no capacity guarantee |
-| Monthly budget alert | $100 | Alert, not a cap |
+   ```sh
+   set -a; . environments/preview.env; set +a
+   backstage-aws env list
+   backstage-aws env status --pull-request 42
+   ```
 
-Private task egress: `BACKSTAGE_AWS_FCK_NAT=true` for one shared instance, or `BACKSTAGE_AWS_NAT_GATEWAYS=1/2` for managed NAT; rerun `base`. Do not combine them. fck-nat is single-instance/single-AZ, not HA; operators own replacement and AMI patch updates. Shared idle resources incur charges; no cost or timing is measured.
+   Expected: `env list` exits 0 with JSON `result.namespaces`; `env status` exits 0 with `result.namespace`, `result.url`, `result.service_status`, `result.running_count`, `result.image_digest`, and `result.ready`. Readiness does not verify sign-in, DNS, or application behavior.
+5. To deploy manually, use the same settings and PR selector:
 
-Each namespace has its own database, but namespaces share RDS and the application role; they are not security boundaries. `seed --file` affects future namespaces only. Secrets come from Secrets Manager; ingress CIDRs control ALB access. Fork PRs receive no deploy role.
+   ```sh
+   set -a; . environments/preview.env; set +a
+   GITHUB_TOKEN="$(gh auth token)" backstage-aws env up --pull-request 42 --approve
+   ```
 
-See [Seed database](seed-database.md), [Secrets](secrets.md), [Back up and restore](backup-and-restore.md), [Tear down](teardown.md), and [Other CI](other-ci.md).
+   Expected: exit 0 and JSON `result.namespace`, `result.url`, `result.image_digest`, `result.timings`, and `result.comment_url`. With a usable GitHub token, the CLI creates or updates the PR comment; without one, deployment still returns its URL and `comment_url` is null.
+
+## Back up and remove
+
+6. Before teardown, export any data to retain to a new local file path and optionally restore it as the seed for future namespaces:
+
+   ```sh
+   set -a; . environments/preview.env; set +a
+   backstage-aws db dump --pull-request 42 --file ./pr-42.dump --approve
+   backstage-aws seed --file ./pr-42.dump --approve
+   ```
+
+   Expected: `db dump` exits 0 with JSON `result.bucket`, `result.key`, `result.database`, and `result.file`; `seed` exits 0 with `result.bucket`, `result.key`, `result.operation_id`, and `result.resumed`. The custom-format dump contains the selected namespace without owner or ACL entries. `seed` replaces the shared seed only; existing namespaces are unchanged.
+7. To remove PR 42 manually, load preview settings and run:
+
+   ```sh
+   set -a; . environments/preview.env; set +a
+   backstage-aws env down --pull-request 42 --approve
+   ```
+
+   Expected: exit 0 and JSON `result.namespace`, `result.destroyed`, and `result.comment_url`. This deletes the namespace database. It does not remove shared VPC/RDS/ECR resources; S3 state versions and shared backups are not a namespace restore mechanism. See [Tear down](teardown.md) and [Back up and restore](backup-and-restore.md).
+
+## Cost and network defaults
+
+8. The generated base uses zero NAT gateways by default; Fargate tasks receive public subnet addresses, but inbound application traffic is restricted to the ALB and the database has no internet route. Preview uses one vCPU/two GiB task per namespace, `db.t4g.micro` with 20 GiB gp3 shared RDS, and Fargate Spot by default except for `production`. A `$100` budget is an alert, not a spend cap. No cost or startup time is measured.

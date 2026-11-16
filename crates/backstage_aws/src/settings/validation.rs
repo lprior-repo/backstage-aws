@@ -60,23 +60,33 @@ fn validate_derived_names(settings: &Settings) -> Result<(String, String, String
             "namespace {namespace:?} is reserved or ends with a hyphen"
         )));
     }
-    let hostname = settings.hostname.clone().unwrap_or_else(|| {
-        if namespace == "production" {
-            settings.domain_name.clone()
-        } else {
-            format!("{namespace}.{}", settings.domain_name)
+    let domain_free = settings.domain_name.is_empty();
+    let hostname = match settings.hostname.as_ref() {
+        Some(hostname) => hostname.clone(),
+        // Without a domain the hostname only ever travels in the Host header.
+        None if domain_free && namespace == "production" => {
+            format!("{}.internal", settings.name)
         }
-    });
+        None if domain_free => format!("{namespace}.{}.internal", settings.name),
+        None if namespace == "production" => settings.domain_name.clone(),
+        None => format!("{namespace}.{}", settings.domain_name),
+    };
     let suffix = format!(".{}", settings.domain_name);
-    if !valid_domain(&hostname)
-        || (hostname != settings.domain_name
-            && hostname
-                .strip_suffix(&suffix)
-                .is_none_or(|prefix| prefix.contains('.')))
-    {
-        return Err(Error::invalid_input(
-            "hostname must be the domain or exactly one label below it",
-        ));
+    let hostname_ok = if domain_free {
+        valid_domain(&hostname) && hostname.ends_with(".internal")
+    } else {
+        valid_domain(&hostname)
+            && (hostname == settings.domain_name
+                || hostname
+                    .strip_suffix(&suffix)
+                    .is_some_and(|prefix| !prefix.contains('.')))
+    };
+    if !hostname_ok {
+        return Err(Error::invalid_input(if domain_free {
+            "without a domain the hostname must be a valid name ending in .internal"
+        } else {
+            "hostname must be the domain or exactly one label below it"
+        }));
     }
     let auth_mode = settings.auth_mode.clone().unwrap_or_else(|| {
         if settings.environment == "production" {
@@ -125,14 +135,17 @@ impl Settings {
         require(&self.environment, r"^[a-z][a-z0-9-]{1,19}$", "environment")?;
         require(&self.aws_account_id, r"^[0-9]{12}$", "AWS account ID")?;
         require(&self.aws_region, r"^[a-z]{2}-[a-z]+-[0-9]+$", "AWS region")?;
-        if !valid_domain(&self.domain_name) {
-            return Err(Error::invalid_input("invalid domain name"));
+        // Domain-free mode needs both DNS settings empty; a domain needs both set.
+        if !self.domain_name.is_empty() || !self.route53_zone_id.is_empty() {
+            if !valid_domain(&self.domain_name) {
+                return Err(Error::invalid_input("invalid domain name"));
+            }
+            require(
+                &self.route53_zone_id,
+                r"^Z[A-Z0-9]{5,32}$",
+                "Route 53 zone ID",
+            )?;
         }
-        require(
-            &self.route53_zone_id,
-            r"^Z[A-Z0-9]{5,32}$",
-            "Route 53 zone ID",
-        )?;
         validate_repository(&self.github_repository)?;
         require(
             &self.owner_github_id,

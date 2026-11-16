@@ -1,14 +1,17 @@
 # Architecture
 
-One Rust CLI orchestrates Terraform and AWS. Node lives only in the Backstage app; CI supplies tools and credentials.
+The Rust CLI provisions AWS resources with Terraform. GitHub Actions assumes a scoped AWS role through OIDC to deploy later pull-request previews. Node runs only in the Backstage app and its image build.
 
 ```mermaid
 flowchart LR
-    Actions[GitHub Actions] -->|OIDC| CLI[backstage-aws]
+    Operator[Operator] -->|read-only setup and doctor| CLI[backstage-aws]
+    Operator -->|up --approve| CLI
+    Actions[GitHub Actions] -->|requests OIDC token| Role[Scoped AWS role via STS]
+    Role -->|temporary credentials| CLI
     CLI --> TF[Terraform / encrypted S3 state]
-    CLI --> ECR[ECR image and cache]
+    CLI --> ECR[ECR image]
     CLI --> Admin[Database admin tasks]
-    Reviewer[Allowed network] --> ALB[Route 53 / ACM / ALB]
+    Reviewer[Allowed IPv4 networks] --> ALB[ALB, HTTPS via Route 53 / ACM when a domain is set]
     ALB --> App[Namespace Fargate service]
     ECR --> App
     App --> Secrets[Secrets Manager]
@@ -22,41 +25,50 @@ flowchart LR
 
 | Stack | Lifetime | Owns |
 |---|---|---|
-| `access` | Owner-managed account setup | Scoped Identity Center provisioner, workload boundary and provisioning policies |
-| `bootstrap` | Account | State/KMS, GitHub OIDC role, optional account baseline/budget |
-| `base` | Shared | VPC, ALB/TLS/DNS, ECS, ECR, RDS, secrets, seed/dump storage, admin tasks |
-| `env` | Namespace | Target group, listener rule, log group, task definition, service |
+| `access` | Owner-managed account setup | Scoped IAM Identity Center provisioner and workload boundary |
+| `bootstrap` | Account | State/KMS, GitHub OIDC role, optional account baseline and budget |
+| `base` | Shared | VPC, ALB/TLS/DNS, ECS, ECR, RDS, secrets, seed/dump storage and admin tasks |
+| `env` | Namespace | Target group, listener rule, log group, task definition and service |
 
-Slow resources exist before PR deployment. State keys: `bootstrap/terraform.tfstate`, `base/terraform.tfstate`, `env/<namespace>.tfstate` in `<name>-<account>-<region>-tfstate`. Native S3 lockfiles serialize Terraform writers.
+`backstage-aws up --approve` runs `doctor`, `bootstrap`, `base`, optional seed and sign-in setup, environment deployment, then repository publish. It builds the first image locally. Later pull-request workflows build images in GitHub Actions. The `access` stack is separate and must already be applied by an account owner.
 
-`access` is applied separately by an existing owner before the CLI's privileged bootstrap. Its state remains owner-managed; preserve and back it up separately. The provisioner cannot modify its own access policies.
+Shared state is stored in `<name>-<account>-<region>-tfstate`, with keys `bootstrap/terraform.tfstate`, `base/terraform.tfstate`, and `env/<namespace>.tfstate`; S3 lockfiles serialize writers. The owner-managed `access` stack is outside this state bucket and must be preserved and backed up separately.
+
+### IAM policy source and review
+
+Each stack keeps its IAM permission, trust, and resource policies in `policies/*.json.tftpl`. Terraform supplies explicit inputs through `templatefile`, validates the rendered JSON with `jsondecode`, and compacts it with `jsonencode`. Keep policy structure in the template; encode substitutions with `jsonencode` so strings and lists retain their JSON types.
+
+Review permission changes in source and in a saved Terraform plan: actions, resources, principals, and conditions must all remain scoped. Apply owner-managed access changes through the `access` stack; use `backstage-aws` for bootstrap and deployment. Do not patch live IAM policies independently of their Terraform source. AWS inline-policy resources remain where already used; external JSON source does not require changing their attachment model.
 
 ## Names and data
 
-| Selection | Namespace | Hostname | Database |
+| Selection | Namespace | Hostname (with domain) | Database |
 |---|---|---|---|
-| `--pull-request 38` | `pr-38` | `pr-38.<domain>` | `pr_38` |
+| Pull request 38 | `pr-38` | `pr-38.<domain>` | `pr_38` |
 | Default preview | `preview` | `preview.<domain>` | `preview` |
 | Production settings | `production` | `<domain>` | `production` |
 
-Explicit namespace overrides PR number. New databases copy `seed` inside PostgreSQL; redeployments preserve them. Seed refreshes affect only future clones. No automatic production sync or anonymization.
+Without a domain, hostnames are `<namespace>.<name>.internal` (`<name>.internal` for `production`): host-header routing keys, not resolvable DNS names, served as HTTP on port 80 to the allowed CIDRs only.
 
-## PR lifecycle
+New namespace databases clone the shared `seed` inside PostgreSQL; redeployments preserve existing databases. A seed refresh affects only future clones. There is no automatic production sync or anonymization.
 
-Open/push → OIDC → concurrent image build + database clone → Terraform → new ECS rollout complete → healthy ALB target → CLI URL comment.
+## Pull-request lifecycle
 
-Close → trusted base-branch workflow → destroy service → drop database → delete current state → update comment. Per-PR runs never cancel active applies. Forks do not deploy.
+Open or push → OIDC → build image and clone seed → Terraform → ECS rollout and healthy ALB target → URL comment. Only same-repository pull requests deploy; forks do not.
 
-The five-minute target assumes warm cache/shared infrastructure. CLI timings exclude GitHub queue time; first builds can take longer.
+Closing a pull request removes its service, database and Terraform state. It does not remove the shared network, load balancer, database or registry. Per-PR runs do not cancel active applies.
 
-## Boundaries
+The under-five-minute preview target is unmeasured and excludes GitHub queue time; cold builds can take longer. Initial shared-resource provisioning is separate and can take tens of minutes.
 
-- **Accounts:** preview and production separate. Namespaces share one application database role and base secrets—not tenant isolation.
-- **AWS identity:** OIDC audience `sts.amazonaws.com`; preview subject `repo:<repo>:*`, production `repo:<repo>:ref:refs/heads/main`. No GitHub deployment Environments. Protect `main`; preview branch authors can exercise the preview role.
-- **App identity:** guest previews behind an IPv4 allowlist; production GitHub OAuth.
-- **Network:** no NAT by default; public task IPs, ALB-only app ingress. `fck-nat=true` uses one shared instance and private task IPs; `nat-gateways=1/2` uses managed NAT. RDS stays isolated.
-- **Capacity:** one 1-vCPU/2-GB task; Spot except production. Shared `db.t4g.micro`, 20-GB gp3, maximum 100 GB. Cheap, not high availability.
-- **Settings:** shell/CI loads committed `environments/*.env`; CLI reads only flags/env. Secrets use ECS injection.
+## Boundaries and defaults
 
-[Quickstart](quickstart.md) · [Settings](reference/settings.md) · [Recovery](guides/backup-and-restore.md).
+- **Accounts:** Keep preview and production in separate accounts. Namespaces share an application database role and base secrets; they are not tenant isolation.
+- **AWS identity:** Workflows use OIDC with audience `sts.amazonaws.com`; preview trust is for the repository's pull-request subjects, production trust is for `main`. No GitHub deployment Environments are used.
+- **App identity:** Preview defaults to guest sign-in; production defaults to GitHub sign-in. Neither flow has been live-verified.
+- **Network:** No NAT gateways by default. App tasks receive public IPs, but their security group accepts inbound traffic only from the ALB; the ALB is restricted to configured IPv4 CIDRs. RDS stays isolated. `fck-nat` or managed NAT gateways are optional and add cost.
+- **Capacity:** One 1-vCPU/2-GB task per namespace; Spot is the default except production. Shared RDS defaults to `db.t4g.micro`, 20-GB gp3 storage and no Multi-AZ standby. This is a low-cost, non-HA default.
+- **Budget:** The $100 monthly threshold is an alert, not a spending cap. A budget is not created unless a budget email is configured. Shared resources remain billable with no previews.
+- **Recovery:** RDS automated backups/PITR retain seven days. State and seed/dump objects are versioned and encrypted; configured recovery paths have not been live-tested and are not a tested disaster-recovery service.
+- **Settings:** The shell or CI loads non-secret `environments/*.env` settings; the CLI reads flags and environment variables, not the files directly. Keep secrets out of settings files.
 
+[Quickstart](quickstart.md) · [Prerequisites](prerequisites.md) · [Settings](reference/settings.md) · [Backup and restore](guides/backup-and-restore.md).

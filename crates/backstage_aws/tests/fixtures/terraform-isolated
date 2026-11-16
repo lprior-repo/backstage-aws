@@ -1,0 +1,29 @@
+#!/bin/sh
+# Stateful stand-in: each private working directory records its own backend,
+# captures its variable into the plan, then applies that captured plan.
+set -eu
+ROOT=$(cd "$PWD/../.." && pwd)
+case "$1" in
+  init)
+    for arg in "$@"; do
+      case "$arg" in
+        -backend-config=key=*) printf '%s\n' "${arg#-backend-config=key=}" > .fixture-backend ;;
+      esac
+    done
+    ;;
+  plan)
+    namespace=$(sed -n 's/^namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' terraform.tfvars)
+    backend=$(cat .fixture-backend)
+    printf '%s %s\n' "$namespace" "$backend" > backstage-aws.tfplan
+    touch "$ROOT/plan-$namespace"
+    attempts=0
+    while [ ! -e "$ROOT/plan-pr-one" ] || [ ! -e "$ROOT/plan-pr-two" ]; do
+      attempts=$((attempts + 1))
+      [ "$attempts" -lt 1000 ] || exit 41
+      sleep 0.01
+    done
+    ;;
+  apply)
+    cat backstage-aws.tfplan >> "$ROOT/applied.log"
+    ;;
+esac

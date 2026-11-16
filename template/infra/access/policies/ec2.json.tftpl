@@ -1,0 +1,98 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:instance/*")},
+      "Condition": {"StringEquals": {"aws:RequestTag/Project": ${jsonencode(name)}, "ec2:InstanceType": "t4g.nano", "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:volume/*")},
+      "Condition": {"StringEquals": {"aws:RequestTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:network-interface/*")},
+      "Condition": {"StringEquals": {"ec2:Region": ${jsonencode(region)}}, "Null": {"ec2:NetworkInterfaceID": "true"}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}::image/*")},
+      "Condition": {"StringEquals": {"ec2:Owner": "568608671756", "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:subnet/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:security-group/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:TerminateInstances", "ec2:ModifyInstanceAttribute", "ec2:ModifyInstanceMetadataOptions"],
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:instance/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:AllocateAddress",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:elastic-ip/*")},
+      "Condition": {"StringEquals": {"aws:RequestTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:ReleaseAddress", "ec2:AssociateAddress", "ec2:DisassociateAddress"],
+      "Resource": [${jsonencode("arn:${partition}:ec2:${region}:${account_id}:elastic-ip/*")}, ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:instance/*")}],
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:CreateFlowLogs",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:CreateFlowLogs",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc-flow-log/*")},
+      "Condition": {"StringEquals": {"aws:RequestTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:DeleteFlowLogs",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc-flow-log/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "CreateOwnedManagedNat",
+      "Effect": "Allow",
+      "Action": "ec2:CreateNatGateway",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:natgateway/*")},
+      "Condition": {"StringEquals": {"aws:RequestTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "ManagedNatUsesOwnedNetwork",
+      "Effect": "Allow",
+      "Action": "ec2:CreateNatGateway",
+      "Resource": [${jsonencode("arn:${partition}:ec2:${region}:${account_id}:vpc/*")}, ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:subnet/*")}, ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:elastic-ip/*")}],
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "DeleteOwnedManagedNat",
+      "Effect": "Allow",
+      "Action": "ec2:DeleteNatGateway",
+      "Resource": ${jsonencode("arn:${partition}:ec2:${region}:${account_id}:natgateway/*")},
+      "Condition": {"StringEquals": {"aws:ResourceTag/Project": ${jsonencode(name)}, "ec2:Region": ${jsonencode(region)}}}
+    }
+  ]
+}

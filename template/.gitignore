@@ -3,8 +3,10 @@
 **/.backstage-aws/
 .terraform/
 **/.terraform/
+.terraform-workspace-*/
 *.tfstate*
 *.tfplan
+*.tfvars
 *.tfvars.json
 backend.local.hcl
 backend.local.tf

@@ -2,9 +2,12 @@ use super::*;
 use crate::settings::{NetworkSettings, Settings};
 use std::path::PathBuf;
 
+type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
 fn settings() -> Settings {
     Settings {
         project: PathBuf::from("/tmp/project with spaces;not-shell"),
+        container_engine: crate::container::ContainerEngine::Docker,
         name: String::from("demo-name"),
         aws_account_id: String::from("123456789012"),
         aws_region: String::from("us-east-1"),
@@ -84,18 +87,21 @@ fn confirmed_args() -> super::super::SetupArgs {
 }
 
 #[test]
-fn missing_early_evidence_blocks_later_verified_stages_and_orders_checks() {
+fn missing_early_evidence_blocks_later_verified_stages_and_orders_checks() -> TestResult {
     let checks = vec![
         check(Stage::Project, Status::Verified),
         check(Stage::Account, Status::Verified),
     ];
-    let report = report(&settings(), &args(), checks).expect("valid report");
+    let report = report(&settings(), &args(), checks)?;
     assert_eq!(report.status, ReportStatus::Blocked);
     assert_eq!(
         report.checks.first().map(|item| item.stage),
         Some(Stage::AwsCli)
     );
-    assert_eq!(report.checks[0].status, Status::NotChecked);
+    assert_eq!(
+        report.checks.first().map(|item| item.status),
+        Some(Status::NotChecked)
+    );
     assert_eq!(
         report.next.as_ref().map(|item| item.title.as_str()),
         Some("Install AWS CLI v2")
@@ -108,6 +114,7 @@ fn missing_early_evidence_blocks_later_verified_stages_and_orders_checks() {
             .map(|item| item.status),
         Some(Status::Verified)
     );
+    Ok(())
 }
 
 #[test]
@@ -132,40 +139,47 @@ fn duplicate_or_ambiguous_evidence_is_rejected() {
 }
 
 #[test]
-fn acknowledgements_require_matching_explicit_manual_confirmation() {
+fn acknowledgements_require_matching_explicit_manual_confirmation() -> TestResult {
     let manual = vec![check(Stage::OrganizationEmail, Status::Acknowledged)];
     assert_eq!(
         report(&settings(), &args(), manual).err().map(|e| e.code()),
         Some("INVALID_INPUT")
     );
     let checks = vec![check(Stage::OrganizationEmail, Status::Acknowledged)];
-    let result = report(&settings(), &confirmed_args(), checks).expect("confirmed report");
-    assert_eq!(result.checks[6].status, Status::Acknowledged);
+    let result = report(&settings(), &confirmed_args(), checks)?;
+    assert_eq!(
+        result.checks.get(6).map(|item| item.status),
+        Some(Status::Acknowledged)
+    );
     assert_eq!(result.status, ReportStatus::Blocked);
+    Ok(())
 }
 
 #[test]
-fn partial_observations_never_create_a_ready_report() {
+fn partial_observations_never_create_a_ready_report() -> TestResult {
     let checks = Stage::ORDER
         .iter()
         .filter(|stage| !stage.manual())
         .map(|stage| check(*stage, Status::Verified))
         .collect();
-    let result = report(&settings(), &confirmed_args(), checks).expect("partial report");
+    let result = report(&settings(), &confirmed_args(), checks)?;
     assert_eq!(result.status, ReportStatus::Blocked);
     assert_eq!(
         result.next.as_ref().map(|action| action.title.as_str()),
         Some("Verify organization email")
     );
-    assert_eq!(result.checks[6].status, Status::NotChecked);
+    assert_eq!(
+        result.checks.get(6).map(|item| item.status),
+        Some(Status::NotChecked)
+    );
+    Ok(())
 }
 
 #[test]
-fn complete_readiness_means_all_live_checks_plus_acknowledged_manual_gates() {
-    let result =
-        report(&settings(), &confirmed_args(), all_successful_checks()).expect("complete report");
+fn complete_readiness_means_all_live_checks_plus_acknowledged_manual_gates() -> TestResult {
+    let result = report(&settings(), &confirmed_args(), all_successful_checks())?;
     assert_eq!(result.status, ReportStatus::ReadyForDoctor);
-    let doctor = result.next.expect("ready report directs user to doctor");
+    let doctor = result.next.ok_or("ready report directs user to doctor")?;
     assert_eq!(doctor.title, "Run doctor");
     assert!(doctor.command.as_ref().is_some_and(|argv| {
         argv.windows(2)
@@ -178,145 +192,82 @@ fn complete_readiness_means_all_live_checks_plus_acknowledged_manual_gates() {
             .any(|line| line.contains("up --approve") && line.contains("charges"))
     );
     assert_eq!(result.checks.len(), Stage::ORDER.len());
-    assert_eq!(result.checks[6].status, Status::Acknowledged);
-    assert_eq!(result.checks[8].status, Status::Acknowledged);
-}
-
-#[test]
-fn resume_is_reconstructed_as_argv_from_settings_without_shell_interpolation() {
-    let mut setup = confirmed_args();
-    setup.confirmed = vec![ManualCheck::OrganizationEmail];
-    let result = report(&settings(), &setup, Vec::new()).expect("report");
-    let command = result.resume;
-    assert_eq!(command.first().map(String::as_str), Some("backstage-aws"));
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--project", "/tmp/project with spaces;not-shell"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--aws-account-id", "123456789012"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--aws-region", "us-east-1"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--allowed-ingress-cidrs", "203.0.113.0/24"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--allowed-ingress-cidrs", "198.51.100.4/32"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--name", "demo-name"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--domain-name", "example.com"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--route53-zone-id", "Z123456789"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--github-repository", "owner/repo"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--owner-github-id", "12345"])
-    );
-    assert!(command.windows(2).any(|pair| pair == ["--spot", "true"]));
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--database-instance-class", "db.t4g.small"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--terraform", "/opt/terraform"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--aws-cli", "/opt/aws cli"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--confirm", "organization-email"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--nat-gateways", "1"])
-    );
-    assert!(
-        command
-            .windows(2)
-            .any(|pair| pair == ["--fck-nat", "false"])
-    );
-    assert!(!command.iter().any(|value| value == "--approve"));
     assert_eq!(
-        result.environment.get("AWS_PROFILE"),
-        Some(&String::from("work profile"))
+        result.checks.get(6).map(|item| item.status),
+        Some(Status::Acknowledged)
     );
+    assert_eq!(
+        result.checks.get(8).map(|item| item.status),
+        Some(Status::Acknowledged)
+    );
+    Ok(())
 }
 
 #[test]
-fn resume_preserves_fck_nat_and_the_explicit_ami_pin() {
+fn resume_arguments_roundtrip_through_the_real_cli_with_leading_hyphen_values() -> TestResult {
+    use clap::Parser;
+
+    let mut source = settings();
+    source.project = PathBuf::from("-portal project");
+    let mut setup = confirmed_args();
+    setup.profile = Some(String::from("-work profile"));
+    let report = report(&source, &setup, Vec::new())?;
+    let parsed = crate::cli::Cli::try_parse_from(report.resume)?;
+    assert_eq!(parsed.settings.project, PathBuf::from("-portal project"));
+    assert_eq!(parsed.settings.aws_account_id, source.aws_account_id);
+    assert_eq!(parsed.settings.github_repository, source.github_repository);
+    assert_eq!(parsed.settings.network.fck_nat, source.network.fck_nat);
+    let crate::cli::Command::Setup(parsed_setup) = parsed.command else {
+        return Err("resume command must parse as setup".into());
+    };
+    assert_eq!(parsed_setup.profile.as_deref(), Some("-work profile"));
+    assert_eq!(parsed_setup.aws_cli, PathBuf::from("/opt/aws cli"));
+    assert_eq!(parsed_setup.confirmed, setup.confirmed);
+    Ok(())
+}
+
+#[test]
+fn resume_preserves_fck_nat_and_the_explicit_ami_pin() -> TestResult {
     let mut source = settings();
     source.network.nat_gateways = 0;
     source.network.fck_nat = true;
     source.network.fck_nat_ami_id = Some("ami-1234567890abcdef0".into());
-    let result = report(&source, &confirmed_args(), Vec::new()).expect("report");
+    let result = report(&source, &confirmed_args(), Vec::new())?;
     assert!(
         result
             .resume
-            .windows(2)
-            .any(|pair| pair == ["--fck-nat", "true"])
+            .iter()
+            .any(|argument| argument == "--fck-nat=true")
     );
     assert!(
         result
             .resume
-            .windows(2)
-            .any(|pair| pair == ["--fck-nat-ami-id", "ami-1234567890abcdef0"])
+            .iter()
+            .any(|argument| argument == "--fck-nat-ami-id=ami-1234567890abcdef0")
     );
     assert!(
         result
             .resume
-            .windows(2)
-            .any(|pair| pair == ["--nat-gateways", "0"])
+            .iter()
+            .any(|argument| argument == "--nat-gateways=0")
     );
+    Ok(())
 }
 
 #[test]
-fn profile_is_not_exported_when_not_explicit() {
+fn profile_is_not_exported_when_not_explicit() -> TestResult {
     let setup = super::super::SetupArgs {
         profile: None,
         ..args()
     };
-    let result = report(&settings(), &setup, Vec::new()).expect("report");
+    let result = report(&settings(), &setup, Vec::new())?;
     assert!(result.environment.is_empty());
     assert!(!result.resume.iter().any(|value| value == "--profile"));
+    Ok(())
 }
 
 #[test]
-fn action_uses_actual_blocker_detail_without_claiming_missing_checks_are_verified() {
+fn action_uses_actual_blocker_detail_without_claiming_missing_checks_are_verified() -> TestResult {
     let checks = vec![
         check(Stage::AwsCli, Status::Verified),
         Check {
@@ -325,8 +276,8 @@ fn action_uses_actual_blocker_detail_without_claiming_missing_checks_are_verifie
             detail: String::from("SSO session expired"),
         },
     ];
-    let result = report(&settings(), &args(), checks).expect("report");
-    let action = result.next.expect("credential action");
+    let result = report(&settings(), &args(), checks)?;
+    let action = result.next.ok_or("expected a credential action")?;
     assert_eq!(
         action.instructions.first().map(String::as_str),
         Some("SSO session expired")
@@ -341,11 +292,15 @@ fn action_uses_actual_blocker_detail_without_claiming_missing_checks_are_verifie
             String::from("work profile")
         ])
     );
-    assert_eq!(result.checks[1].status, Status::ActionRequired);
+    assert_eq!(
+        result.checks.get(1).map(|item| item.status),
+        Some(Status::ActionRequired)
+    );
+    Ok(())
 }
 
 #[test]
-fn untrusted_blocker_detail_stays_data_and_never_becomes_a_command() {
+fn untrusted_blocker_detail_stays_data_and_never_becomes_a_command() -> TestResult {
     let detail = String::from("denied; aws iam create-user --user-name attacker");
     let checks = vec![
         check(Stage::AwsCli, Status::Verified),
@@ -355,25 +310,26 @@ fn untrusted_blocker_detail_stays_data_and_never_becomes_a_command() {
             detail: detail.clone(),
         },
     ];
-    let result = report(&settings(), &args(), checks).expect("report");
-    let next = result.next.expect("blocker action");
+    let result = report(&settings(), &args(), checks)?;
+    let next = result.next.ok_or("expected a blocker action")?;
     assert_eq!(next.instructions.first(), Some(&detail));
     assert!(
         next.command
             .as_ref()
             .is_none_or(|argv| !argv.contains(&detail))
     );
+    Ok(())
 }
 
 #[test]
-fn unreadable_account_state_never_becomes_an_enable_or_create_instruction() {
+fn unreadable_account_state_never_becomes_an_enable_or_create_instruction() -> TestResult {
     let evidence = vec![Check {
         stage: Stage::AwsCli,
         status: Status::Blocked,
         detail: String::from("aws discovery denied"),
     }];
-    let result = report(&settings(), &args(), evidence).expect("report");
-    let next = result.next.expect("blocked action");
+    let result = report(&settings(), &args(), evidence)?;
+    let next = result.next.ok_or("expected a blocked action")?;
     assert_eq!(next.title, "Resolve blocked account discovery");
     assert!(next.command.is_none());
     assert!(
@@ -381,4 +337,5 @@ fn unreadable_account_state_never_becomes_an_enable_or_create_instruction() {
             .iter()
             .any(|line| line.contains("not evidence of a missing resource"))
     );
+    Ok(())
 }

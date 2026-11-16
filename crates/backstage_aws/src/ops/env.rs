@@ -1,13 +1,14 @@
 //! Per-namespace environments: up, down, list, status.
 use crate::{
-    ctx::{Ctx, StepTiming, poll, step, write_summary},
+    ctx::{Ctx, StepTiming, poll, step, write_summary_to},
     db,
     error::{Error, Result},
     github,
     terraform::{self, Stack, output_str},
 };
 use aws_sdk_ecs::types::{DeploymentRolloutState, Service};
-use aws_sdk_elasticloadbalancingv2::types::TargetHealthStateEnum;
+mod readiness;
+use readiness::{NetworkProbe, Readiness, any_healthy, decide, network_probe, service_steady};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::{Duration, Instant};
@@ -28,6 +29,8 @@ pub(crate) struct EnvUpResult {
     timings: Vec<StepTiming>,
     /// The pull-request comment announcing the environment, when one was written.
     comment_url: Option<String>,
+    /// A best-effort request through the load balancer; it never decides readiness.
+    network_probe: NetworkProbe,
 }
 #[derive(Serialize)]
 pub(crate) struct EnvDownResult {
@@ -47,6 +50,7 @@ pub(crate) struct EnvStatusResult {
     running_count: i32,
     image_digest: String,
     ready: bool,
+    network_probe: NetworkProbe,
 }
 
 pub(crate) async fn env_up(ctx: &Ctx, digest: Option<&str>, scan: bool) -> Result<EnvUpResult> {
@@ -76,7 +80,8 @@ pub(crate) async fn env_up(ctx: &Ctx, digest: Option<&str>, scan: bool) -> Resul
     let outputs = terraform::required_outputs(ctx, Stack::Env).await?;
     timings.push(step("ecs.rollout", wait_rollout(ctx, &outputs)).await?.1);
     timings.push(step("alb.healthy", wait_healthy(ctx, &outputs)).await?.1);
-    write_summary(&timings)?;
+    let network_probe = probe(ctx, &outputs).await;
+    write_summary_to(ctx.summary_path.as_deref(), &timings)?;
     let url = output_str(&outputs, "url")?.to_owned();
     let seconds = started.elapsed().as_secs();
     let text = format!(
@@ -93,6 +98,7 @@ pub(crate) async fn env_up(ctx: &Ctx, digest: Option<&str>, scan: bool) -> Resul
         url,
         image_digest: image,
         timings,
+        network_probe,
     })
 }
 
@@ -157,14 +163,34 @@ pub(crate) async fn env_list(ctx: &Ctx) -> Result<EnvListResult> {
 pub(crate) async fn env_status(ctx: &Ctx) -> Result<EnvStatusResult> {
     let outputs = terraform::required_outputs(ctx, Stack::Env).await?;
     let service = describe_service(ctx, &outputs).await?;
+    let steady = service_steady(&service);
+    let healthy = steady && has_healthy_target(ctx, &outputs).await?;
+    let ready = decide(steady, healthy) == Readiness::Ready;
     Ok(EnvStatusResult {
         namespace: ctx.settings.namespace.clone(),
         url: output_str(&outputs, "url")?.to_owned(),
         service_status: service.status().unwrap_or("UNKNOWN").to_owned(),
         running_count: service.running_count(),
         image_digest: output_str(&outputs, "image_digest")?.to_owned(),
-        ready: has_healthy_target(ctx, &outputs).await?,
+        ready,
+        network_probe: probe(ctx, &outputs).await,
     })
+}
+
+/// Older state may lack the load balancer outputs; the probe is then skipped.
+async fn probe(ctx: &Ctx, outputs: &Value) -> NetworkProbe {
+    let text = |key: &str| {
+        outputs
+            .get(key)
+            .and_then(Value::as_str)
+            .map_or("", |text| text)
+    };
+    network_probe(
+        text("url_scheme"),
+        text("load_balancer_dns_name"),
+        &ctx.settings.hostname,
+    )
+    .await
 }
 
 async fn describe_service(ctx: &Ctx, outputs: &Value) -> Result<Service> {
@@ -220,7 +246,7 @@ fn rollout(service: &Service, expected: &str) -> Result<Option<()>> {
         Some(DeploymentRolloutState::Failed) => Err(failed(
             primary
                 .rollout_state_reason()
-                .unwrap_or("the deployment failed"),
+                .map_or_else(|| "the deployment failed", |reason| reason),
         )),
         _ => Ok(None),
     }
@@ -256,12 +282,7 @@ async fn has_healthy_target(ctx: &Ctx, outputs: &Value) -> Result<bool> {
                 error.to_string(),
             )
         })?;
-    let healthy =
-        |state: Option<&TargetHealthStateEnum>| state == Some(&TargetHealthStateEnum::Healthy);
-    let targets = response.target_health_descriptions();
-    Ok(targets
-        .iter()
-        .any(|target| healthy(target.target_health().and_then(|health| health.state()))))
+    Ok(any_healthy(response.target_health_descriptions()))
 }
 
 #[cfg(test)]

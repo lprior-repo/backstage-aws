@@ -1,0 +1,91 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CreateProjectOperationsTopic",
+      "Effect": "Allow",
+      "Action": ["sns:CreateTopic"],
+      "Resource": [${jsonencode("arn:${partition}:sns:${region}:${account_id}:${name}-operations")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}, "aws:RequestTag/Project": ${jsonencode(name)}}}
+    },
+    {
+      "Sid": "ManageProjectOperationsTopic",
+      "Effect": "Allow",
+      "Action": ["sns:GetTopicAttributes", "sns:SetTopicAttributes", "sns:DeleteTopic", "sns:Subscribe", "sns:ListSubscriptionsByTopic", "sns:ListTagsForResource", "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Unsubscribe"],
+      "Resource": [${jsonencode("arn:${partition}:sns:${region}:${account_id}:${name}-operations")}, ${jsonencode("arn:${partition}:sns:${region}:${account_id}:${name}-operations:*")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "TagProjectOperationsTopic",
+      "Effect": "Allow",
+      "Action": ["sns:TagResource"],
+      "Resource": [${jsonencode("arn:${partition}:sns:${region}:${account_id}:${name}-operations")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}, "aws:RequestTag/Project": ${jsonencode(name)}}, "ForAllValues:StringEquals": {"aws:TagKeys": ["Project", "ManagedBy", "Environment"]}}
+    },
+    {
+      "Sid": "UntagProjectOperationsTopicWithoutChangingOwner",
+      "Effect": "Allow",
+      "Action": ["sns:UntagResource"],
+      "Resource": [${jsonencode("arn:${partition}:sns:${region}:${account_id}:${name}-operations")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}, "ForAllValues:StringEquals": {"aws:TagKeys": ["ManagedBy", "Environment"]}}
+    },
+    {
+      "Sid": "ManageProjectTrail",
+      "Effect": "Allow",
+      "Action": ["cloudtrail:GetTrail", "cloudtrail:GetTrailStatus", "cloudtrail:GetEventSelectors", "cloudtrail:ListTags", "cloudtrail:GetInsightSelectors"],
+      "Resource": [${jsonencode("arn:${partition}:cloudtrail:${region}:${account_id}:trail/${name}-account")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "TrailDiscovery",
+      "Effect": "Allow",
+      "Action": ["cloudtrail:DescribeTrails"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "ManageProjectAnalyzer",
+      "Effect": "Allow",
+      "Action": ["access-analyzer:GetAnalyzer", "access-analyzer:ListTagsForResource"],
+      "Resource": [${jsonencode("arn:${partition}:access-analyzer:${region}:${account_id}:analyzer/${name}-account")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "AnalyzerDiscovery",
+      "Effect": "Allow",
+      "Action": ["access-analyzer:ListAnalyzers"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Sid": "ManageProjectBudget",
+      "Effect": "Allow",
+      "Action": ["budgets:ModifyBudget", "budgets:ViewBudget", "budgets:TagResource", "budgets:ListTagsForResource", "budgets:UntagResource"],
+      "Resource": [${jsonencode("arn:${partition}:budgets::${account_id}:budget/${name}-monthly")}]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudwatch:PutMetricAlarm"],
+      "Resource": [${jsonencode("arn:${partition}:cloudwatch:${region}:${account_id}:alarm:${name}-*")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}, "aws:RequestTag/Project": ${jsonencode(name)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudwatch:DescribeAlarms", "cloudwatch:ListTagsForResource", "cloudwatch:DeleteAlarms"],
+      "Resource": [${jsonencode("arn:${partition}:cloudwatch:${region}:${account_id}:alarm:${name}-*")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudwatch:TagResource"],
+      "Resource": [${jsonencode("arn:${partition}:cloudwatch:${region}:${account_id}:alarm:${name}-*")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}, "aws:RequestTag/Project": ${jsonencode(name)}}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudwatch:UntagResource"],
+      "Resource": [${jsonencode("arn:${partition}:cloudwatch:${region}:${account_id}:alarm:${name}-*")}],
+      "Condition": {"StringEquals": {"aws:RequestedRegion": ${jsonencode(region)}}, "ForAllValues:StringEquals": {"aws:TagKeys": ["ManagedBy", "Environment"]}}
+    }
+  ]
+}

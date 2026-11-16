@@ -131,6 +131,7 @@ impl ValidatedSettings {
         set("GITHUB_REPOSITORY", &s.github_repository);
         set("OWNER_GITHUB_ID", &s.owner_github_id);
         set("ENVIRONMENT", &s.environment);
+        set("CONTAINER_ENGINE", &s.container_engine);
         set("AUTH_MODE", &self.auth_mode);
         set("ALLOWED_INGRESS_CIDRS", &s.allowed_ingress_cidrs.join(","));
         set("PLUGIN_SECRETS", &s.plugin_secrets.join(","));
@@ -190,10 +191,10 @@ mod tests {
                 .and_then(|rest| rest.strip_suffix("\" {"));
             if let Some(name) = name {
                 variables.push((name.to_owned(), false));
-            } else if line.starts_with("  default ") {
-                if let Some(last) = variables.last_mut() {
-                    last.1 = true;
-                }
+            } else if line.starts_with("  default ")
+                && let Some(last) = variables.last_mut()
+            {
+                last.1 = true;
             }
         }
         variables
@@ -209,7 +210,7 @@ mod tests {
             .map(|(key, _)| key)
             .collect();
         let declared = declared(sources);
-        assert!(!declared.is_empty());
+        assert_ne!(declared, []);
         for key in &written {
             assert!(
                 declared.iter().any(|(name, _)| name == *key),
@@ -271,6 +272,25 @@ mod tests {
             Some(&Value::from("pr-38.preview.example.com"))
         );
         assert_eq!(vars.get("database_name"), Some(&Value::from("pr_38")));
+        Ok(())
+    }
+
+    #[test]
+    fn production_without_explicit_auth_defaults_to_github() -> Result<()> {
+        let mut settings = Settings::sample(PathBuf::from("."));
+        settings.environment = "production".into();
+        settings.namespace = None;
+        settings.auth_mode = None;
+        let validated = settings.validate()?;
+        assert_eq!(
+            validated.env_tfvars("sha256:abc").get("auth_mode"),
+            Some(&Value::from("github"))
+        );
+        assert!(
+            validated
+                .settings_file()
+                .contains("BACKSTAGE_AWS_AUTH_MODE='github'")
+        );
         Ok(())
     }
 

@@ -9,6 +9,7 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.tfvars
 *.tfvars.json
 backend.local.hcl
 backend.local.tf

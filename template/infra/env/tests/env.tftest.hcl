@@ -126,3 +126,47 @@ run "other_namespaces_never_take_a_pull_request_priority" {
     error_message = "Named namespaces hash into the range above every pull request priority."
   }
 }
+
+run "domain_free_environment_uses_http_and_an_internal_hostname" {
+  command = plan
+  variables {
+    hostname    = "pr-38.backstage.internal"
+    domain_name = ""
+  }
+  override_data {
+    target = data.terraform_remote_state.base
+    values = {
+      outputs = {
+        vpc_id                          = "vpc-12345678"
+        listener_arn                    = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test/1234567890123456/1234567890123456"
+        url_scheme                      = "http"
+        load_balancer_dns_name          = "test-123.us-east-1.elb.amazonaws.com"
+        kms_key_arn                     = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
+        ecr_repository_url              = "123456789012.dkr.ecr.us-east-1.amazonaws.com/backstage/portal"
+        database_application_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:backstage/database-app"
+        database_endpoint               = "db.example.us-east-1.rds.amazonaws.com"
+        ecs_cluster_name                = "backstage"
+        ecs_cluster_arn                 = "arn:aws:ecs:us-east-1:123456789012:cluster/backstage"
+        session_secret_arn              = "arn:aws:secretsmanager:us-east-1:123456789012:secret:backstage/session"
+        application_subnet_ids          = ["subnet-12345678"]
+        assign_public_ip                = true
+        application_execution_role_arn  = "arn:aws:iam::123456789012:role/backstage-portal-execution"
+        application_task_role_arn       = "arn:aws:iam::123456789012:role/backstage-portal-task"
+        portal_security_group_id        = "sg-12345678"
+        identity_secret_arn             = "arn:aws:secretsmanager:us-east-1:123456789012:secret:backstage/identity"
+        application_secret_arns         = {}
+      }
+    }
+  }
+  assert {
+    condition = {
+      for item in jsondecode(aws_ecs_task_definition.env.container_definitions)[0].environment : item.name => item.value
+      if contains(["APP_BASE_URL", "BACKEND_BASE_URL"], item.name)
+    } == { APP_BASE_URL = "http://pr-38.backstage.internal", BACKEND_BASE_URL = "http://pr-38.backstage.internal" }
+    error_message = "Base URLs follow the scheme the base stack reports."
+  }
+  assert {
+    condition     = output.url == "http://pr-38.backstage.internal" && output.load_balancer_dns_name == "test-123.us-east-1.elb.amazonaws.com"
+    error_message = "Outputs expose the http URL and the load balancer DNS name."
+  }
+}

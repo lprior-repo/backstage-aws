@@ -24,47 +24,34 @@ pub(super) fn resume_command(
     append_settings(&mut command, settings)?;
     append_pair(&mut command, "--aws-cli", path_value(&args.aws_cli)?);
     if let Some(profile) = &args.profile {
-        command.extend([String::from("--profile"), profile.clone()]);
+        append_pair(&mut command, "--profile", profile);
     }
     args.confirmed.iter().for_each(|check| {
-        command.extend([String::from("--confirm"), confirm_name(*check)]);
+        append_pair(&mut command, "--confirm", confirm_name(*check));
     });
     Ok(command)
 }
 
-fn path_value(path: &std::path::Path) -> crate::error::Result<String> {
+fn path_value(path: &std::path::Path) -> crate::error::Result<&str> {
     path.to_str()
-        .map(String::from)
         .ok_or_else(|| crate::error::Error::invalid_input("setup resume path is not valid UTF-8"))
 }
 
 fn append_settings(command: &mut Vec<String>, settings: &Settings) -> crate::error::Result<()> {
     append_pair(command, "--project", path_value(&settings.project)?);
-    append_pair(command, "--name", settings.name.clone());
-    append_pair(command, "--aws-account-id", settings.aws_account_id.clone());
-    append_pair(command, "--aws-region", settings.aws_region.clone());
-    append_pair(command, "--domain-name", settings.domain_name.clone());
-    append_pair(
-        command,
-        "--route53-zone-id",
-        settings.route53_zone_id.clone(),
-    );
-    append_pair(
-        command,
-        "--github-repository",
-        settings.github_repository.clone(),
-    );
-    append_pair(
-        command,
-        "--owner-github-id",
-        settings.owner_github_id.clone(),
-    );
+    append_pair(command, "--name", &settings.name);
+    append_pair(command, "--aws-account-id", &settings.aws_account_id);
+    append_pair(command, "--aws-region", &settings.aws_region);
+    append_pair(command, "--domain-name", &settings.domain_name);
+    append_pair(command, "--route53-zone-id", &settings.route53_zone_id);
+    append_pair(command, "--github-repository", &settings.github_repository);
+    append_pair(command, "--owner-github-id", &settings.owner_github_id);
     append_optional(command, "--budget-email", settings.budget_email.as_deref());
     append_optional(command, "--alert-email", settings.alert_email.as_deref());
     settings.allowed_ingress_cidrs.iter().for_each(|value| {
-        append_pair(command, "--allowed-ingress-cidrs", value.clone());
+        append_pair(command, "--allowed-ingress-cidrs", value);
     });
-    append_pair(command, "--environment", settings.environment.clone());
+    append_pair(command, "--environment", &settings.environment);
     append_optional(
         command,
         "--pull-request",
@@ -81,36 +68,20 @@ fn append_settings(command: &mut Vec<String>, settings: &Settings) -> crate::err
         "--spot",
         settings.spot.map(|value| value.to_string()).as_deref(),
     );
-    append_pair(
-        command,
-        "--monthly-budget-usd",
-        settings.monthly_budget_usd.to_string(),
-    );
-    append_pair(
-        command,
-        "--account-baseline",
-        settings.account_baseline.to_string(),
-    );
+    append_pair(command, "--monthly-budget-usd", settings.monthly_budget_usd);
+    append_pair(command, "--account-baseline", settings.account_baseline);
     append_network(command, settings);
-    append_pair(
-        command,
-        "--desired-count",
-        settings.desired_count.to_string(),
-    );
-    append_pair(
-        command,
-        "--max-high-findings",
-        settings.max_high_findings.to_string(),
-    );
+    append_pair(command, "--desired-count", settings.desired_count);
+    append_pair(command, "--max-high-findings", settings.max_high_findings);
     append_pair(
         command,
         "--max-critical-findings",
-        settings.max_critical_findings.to_string(),
+        settings.max_critical_findings,
     );
     settings
         .plugin_secrets
         .iter()
-        .for_each(|value| append_pair(command, "--plugin-secrets", value.clone()));
+        .for_each(|value| append_pair(command, "--plugin-secrets", value));
     append_optional(
         command,
         "--github-oidc-provider-arn",
@@ -123,12 +94,8 @@ fn append_settings(command: &mut Vec<String>, settings: &Settings) -> crate::err
 }
 
 fn append_network(command: &mut Vec<String>, settings: &Settings) {
-    append_pair(
-        command,
-        "--nat-gateways",
-        settings.network.nat_gateways.to_string(),
-    );
-    append_pair(command, "--fck-nat", settings.network.fck_nat.to_string());
+    append_pair(command, "--nat-gateways", settings.network.nat_gateways);
+    append_pair(command, "--fck-nat", settings.network.fck_nat);
     append_optional(
         command,
         "--fck-nat-ami-id",
@@ -137,29 +104,29 @@ fn append_network(command: &mut Vec<String>, settings: &Settings) {
     append_pair(
         command,
         "--database-instance-class",
-        settings.network.database_instance_class.clone(),
+        &settings.network.database_instance_class,
     );
     append_pair(
         command,
         "--database-multi-az",
-        settings.network.database_multi_az.to_string(),
+        settings.network.database_multi_az,
     );
 }
 
 fn append_optional(command: &mut Vec<String>, flag: &str, value: Option<&str>) {
     if let Some(value) = value {
-        append_pair(command, flag, value.to_owned());
+        append_pair(command, flag, value);
     }
 }
 
-fn append_pair(command: &mut Vec<String>, flag: &str, value: String) {
-    command.extend([flag.to_owned(), value]);
+fn append_pair(command: &mut Vec<String>, flag: &str, value: impl std::fmt::Display) {
+    command.push(format!("{flag}={value}"));
 }
 
-fn confirm_name(check: ManualCheck) -> String {
+const fn confirm_name(check: ManualCheck) -> &'static str {
     match check {
-        ManualCheck::OrganizationEmail => String::from("organization-email"),
-        ManualCheck::IdentityCenterMfa => String::from("identity-center-mfa"),
+        ManualCheck::OrganizationEmail => "organization-email",
+        ManualCheck::IdentityCenterMfa => "identity-center-mfa",
     }
 }
 

@@ -20,10 +20,14 @@ RDS has seven-day automated backups/PITR, deletion protection and a final-snapsh
 
 `seed --file DUMP --approve` restores only the template for future namespaces, not an existing namespace. Full namespace/PITR restoration and endpoint cutover require an explicit operator recovery procedure. Preserve both KMS keys; retained ciphertext is unusable if its key is destroyed.
 
+Seed replacement uses an immutable operation-specific dump and an empty staging database. It preserves the live seed if restoration fails before cutover. An interrupted approved rerun resumes the checkpoint's operation and dump, not a newly supplied file. Ambiguous database cutover state fails closed; inspect it rather than deleting databases or checkpoints.
+
 ECR retains fifty recent images, not every deployed release forever. Preserve release images separately if rebuilding from source is insufficient.
 
 ## Password rotation
 
-`db rotate-password --approve` stages `AWSPENDING`, alters the PostgreSQL role, promotes `AWSCURRENT`, then restarts services. Failures may leave the database changed before promotion/restarts complete. Inspect the failed step and rerun; expect brief connection errors. Do not assume the old credential remains valid after every failure.
+`db rotate-password --approve` pins the previous version, stages a replacement under its operation ID, alters the PostgreSQL role using that exact version, promotes `AWSCURRENT`, then restarts services. Failures may leave the database changed before promotion/restarts complete. Inspect the failed step and rerun; expect brief connection errors. Do not assume the old credential remains valid after every failure.
+
+Seed and rotation keep versioned checkpoints under `operations/seed/active.json` and `operations/rotation/active.json` in the seed bucket. Approved reruns resume an active operation. Uncertain task launches reuse their persisted attempt; only an observed terminal failure permits a fresh attempt on a later explicit invocation. Completion remains a durable conditional checkpoint update: never delete an active record or its versions to bypass an error.
 
 Full [backup and restore procedures](https://github.com/lprior-repo/backstage-aws/blob/main/docs/guides/backup-and-restore.md). No AWS restore or teardown has been live-verified.

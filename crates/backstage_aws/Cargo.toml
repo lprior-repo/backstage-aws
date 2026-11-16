@@ -18,22 +18,37 @@ aws-sdk-sts = { version = "1.126.0", default-features = false, features = ["defa
 aws-smithy-runtime-api = "1.21.0"
 aws-smithy-types = "1.9.4"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+flate2 = "1.1.10"
+hcl-rs = "0.20.0"
+hcl-edit = "0.10.0"
 include_dir = "0.7.4"
 octocrab = "0.54.9"
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "process-session", "kill-on-drop"] }
 regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tar = "0.4"
+tempfile = "3.27.0"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", default-features = false, features = ["rt", "rt-multi-thread", "time", "macros", "process", "io-util", "fs"] }
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "rt-multi-thread", "time", "macros", "process", "io-util", "fs", "signal"] }
+uuid = { version = "1", features = ["v4"] }
+yaml-edit = "0.3.6"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 aws-smithy-mocks = "0.3.0"
-tempfile = "3.27.0"
+aws-sdk-ecr = { version = "1.140.0", default-features = false, features = ["test-util"] }
 aws-sdk-ecs = { version = "1.159.0", default-features = false, features = ["test-util"] }
 aws-sdk-elasticloadbalancingv2 = { version = "1.136.0", default-features = false, features = ["test-util"] }
 aws-sdk-s3 = { version = "1.159.0", default-features = false, features = ["test-util"] }
 aws-sdk-secretsmanager = { version = "1.128.0", default-features = false, features = ["test-util"] }
 tokio = { version = "1.54.1", default-features = false, features = ["test-util"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
+
+[build-dependencies]
+ignore = { version = "0.4", default-features = false }

@@ -11,11 +11,15 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use tokio::io::AsyncReadExt;
 
+mod bucket;
+pub(crate) mod generate;
 mod stacks;
 pub(crate) use stacks::{apply, bootstrap, destroy};
 
 const VERSION: &str = "1.17.2";
+const MAX_STATE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Stack {
@@ -67,27 +71,12 @@ pub(crate) async fn verify_version(terraform: &Path) -> Result<()> {
 /// Outputs of an applied stack, read from its state object. `None` when the
 /// stack has never been applied, or the account was never bootstrapped.
 pub(crate) async fn outputs(ctx: &Ctx, stack: Stack) -> Result<Option<Value>> {
-    let failed = |detail: String| Error::aws_failed("s3", "GetObject", detail);
-    let request = ctx
-        .s3
-        .get_object()
-        .bucket(ctx.settings.state_bucket())
-        .key(stack.state_key(ctx));
-    let missing =
-        |error: &GetObjectError| error.is_no_such_key() || error.code() == Some("NoSuchBucket");
-    let object = match request.send().await {
-        Ok(object) => object,
-        Err(error) if error.as_service_error().is_some_and(missing) => return Ok(None),
-        Err(error) => return Err(failed(error.to_string())),
-    };
-    let bytes = object
-        .body
-        .collect()
-        .await
-        .map_err(|error| failed(error.to_string()))?
-        .into_bytes();
-    let state: Value = serde_json::from_slice(&bytes)
-        .map_err(|error| Error::state_failed(format!("{} state: {error}", stack.name())))?;
+    Ok(remote_state(ctx, stack)
+        .await?
+        .map(|state| state_outputs(&state)))
+}
+
+fn state_outputs(state: &Value) -> Value {
     let values = state
         .get("outputs")
         .and_then(Value::as_object)
@@ -95,7 +84,38 @@ pub(crate) async fn outputs(ctx: &Ctx, stack: Stack) -> Result<Option<Value>> {
         .flatten()
         .filter_map(|(name, output)| Some((name.clone(), output.get("value")?.clone())))
         .collect::<Map<_, _>>();
-    Ok(Some(Value::Object(values)))
+    Value::Object(values)
+}
+
+async fn remote_state(ctx: &Ctx, stack: Stack) -> Result<Option<Value>> {
+    let failed = |detail: String| Error::aws_failed("s3", "GetObject", detail);
+    let request = ctx
+        .s3
+        .get_object()
+        .bucket(ctx.settings.state_bucket())
+        .key(stack.state_key(ctx))
+        .expected_bucket_owner(&ctx.settings.settings.aws_account_id);
+    let missing =
+        |error: &GetObjectError| error.is_no_such_key() || error.code() == Some("NoSuchBucket");
+    let object = match request.send().await {
+        Ok(object) => object,
+        Err(error) if error.as_service_error().is_some_and(missing) => return Ok(None),
+        Err(error) => return Err(failed(error.to_string())),
+    };
+    let mut body = object.body.into_async_read().take(MAX_STATE_BYTES + 1);
+    let mut bytes = Vec::new();
+    body.read_to_end(&mut bytes)
+        .await
+        .map_err(|error| failed(error.to_string()))?;
+    if u64::try_from(bytes.len()).map_or(true, |size| size > MAX_STATE_BYTES) {
+        return Err(Error::state_failed(format!(
+            "{} state exceeds the {MAX_STATE_BYTES}-byte limit",
+            stack.name()
+        )));
+    }
+    let state: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| Error::state_failed(format!("{} state: {error}", stack.name())))?;
+    Ok(Some(state))
 }
 
 /// Outputs of a stack that must already be applied.

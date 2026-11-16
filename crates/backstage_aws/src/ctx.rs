@@ -18,6 +18,7 @@ pub(crate) struct Ctx {
     pub(crate) s3: aws_sdk_s3::Client,
     pub(crate) secrets: aws_sdk_secretsmanager::Client,
     pub(crate) terraform: PathBuf,
+    pub(crate) summary_path: Option<PathBuf>,
 }
 impl Ctx {
     pub(crate) fn new(settings: ValidatedSettings, aws: &aws_config::SdkConfig) -> Self {
@@ -31,6 +32,7 @@ impl Ctx {
             s3: aws_sdk_s3::Client::new(aws),
             secrets: aws_sdk_secretsmanager::Client::new(aws),
             terraform: settings.settings.terraform_path(),
+            summary_path: std::env::var_os("GITHUB_STEP_SUMMARY").map(PathBuf::from),
             settings,
         }
     }
@@ -45,7 +47,9 @@ impl Ctx {
             .behavior_version(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new("us-east-1"))
             .build();
-        Ok(Self::new(settings.validate()?, &aws))
+        let mut context = Self::new(settings.validate()?, &aws);
+        context.summary_path = None;
+        Ok(context)
     }
 
     /// Every command that changes anything calls this before doing so.
@@ -88,9 +92,9 @@ pub(crate) struct StepTiming {
     pub(crate) status: String,
     pub(crate) elapsed_ms: u128,
 }
-/// Calls `probe` every `interval` until it yields a value, for at most
-/// `attempts` calls. SDK waiters back off exponentially, which is too slow for
-/// a deployment that should finish within minutes.
+/// Calls `probe` until it yields a value, an attempt limit is reached, or the
+/// total polling deadline expires. The deadline includes time spent awaiting a
+/// probe, not only the intervals between completed probes.
 pub(crate) async fn poll<T, F>(
     what: &'static str,
     remote_id: &str,
@@ -101,11 +105,25 @@ pub(crate) async fn poll<T, F>(
 where
     F: Future<Output = Result<Option<T>>>,
 {
-    for _ in 0..attempts {
-        if let Some(value) = probe().await? {
+    let deadline = tokio::time::Instant::now()
+        .checked_add(interval.saturating_mul(attempts))
+        .ok_or_else(|| Error::remote_timeout(what, remote_id))?;
+    for attempt in 0..attempts {
+        let result = tokio::time::timeout_at(deadline, probe()).await;
+        let value = match result {
+            Ok(result) => result?,
+            Err(_) => return Err(Error::remote_timeout(what, remote_id)),
+        };
+        if let Some(value) = value {
             return Ok(value);
         }
-        tokio::time::sleep(interval).await;
+        if attempt.saturating_add(1) < attempts
+            && tokio::time::timeout_at(deadline, tokio::time::sleep(interval))
+                .await
+                .is_err()
+        {
+            return Err(Error::remote_timeout(what, remote_id));
+        }
     }
     Err(Error::remote_timeout(what, remote_id))
 }
@@ -130,9 +148,13 @@ pub(crate) async fn step<T>(
     };
     Ok((outcome?, timing))
 }
-/// Appends the step timeline to the GitHub job summary when one is available.
-pub(crate) fn write_summary(timings: &[StepTiming]) -> Result<()> {
-    let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") else {
+
+/// Appends the step timeline to the configured GitHub job summary, if any.
+pub(crate) fn write_summary_to(
+    path: Option<&std::path::Path>,
+    timings: &[StepTiming],
+) -> Result<()> {
+    let Some(path) = path else {
         return Ok(());
     };
     let rows = timings.iter().map(|timing| {
@@ -151,6 +173,30 @@ pub(crate) fn write_summary(timings: &[StepTiming]) -> Result<()> {
         .open(path)
         .and_then(|mut file| file.write_all(table.as_bytes()))
         .map_err(|error| Error::state_failed(error.to_string()))
+}
+#[cfg(test)]
+mod polling_deadline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test(start_paused = true)]
+    async fn deadline_times_out_a_probe_that_never_completes() {
+        let result: Result<()> = poll(
+            "deployment",
+            "service-deadline",
+            Duration::from_secs(2),
+            3,
+            || async { std::future::pending::<Result<Option<()>>>().await },
+        )
+        .await;
+        assert_eq!(
+            result.map_err(|error| (error.exit_code(), error.to_string())),
+            Err((
+                5,
+                "deployment continues remotely (service-deadline)".to_owned()
+            ))
+        );
+    }
 }
 pub(crate) fn print_success(command: &str, result: impl Serialize) -> Result<()> {
     print_envelope(&serde_json::json!({"ok":true,"command":command,"result":result}))
@@ -183,19 +229,23 @@ fn print_envelope(value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::Cell, time::Duration};
+    use std::{
+        cell::Cell,
+        sync::atomic::{AtomicU32, Ordering},
+        time::Duration,
+    };
 
     const INTERVAL: Duration = Duration::from_secs(3);
 
     async fn probe_until(ready_on: u32, attempts: u32) -> (Result<u32>, u32, Duration) {
-        let calls = Cell::new(0_u32);
+        let calls = AtomicU32::new(0);
         let started = tokio::time::Instant::now();
         let outcome = poll("deployment", "service-1", INTERVAL, attempts, || async {
-            calls.set(calls.get().saturating_add(1));
-            Ok((calls.get() == ready_on).then_some(calls.get()))
+            let seen = calls.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+            Ok((seen == ready_on).then_some(seen))
         })
         .await;
-        (outcome, calls.get(), started.elapsed())
+        (outcome, calls.load(Ordering::Relaxed), started.elapsed())
     }
 
     #[tokio::test(start_paused = true)]

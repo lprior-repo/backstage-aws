@@ -36,33 +36,81 @@ pub(crate) struct CheckResult {
     passed: Vec<String>,
 }
 
-pub(crate) async fn check(project: &Path, terraform: &Path, app: bool) -> Result<CheckResult> {
+pub(crate) enum ApplicationCheck<'a> {
+    None,
+    Build,
+    Runtime { postgres_bin: Option<&'a Path> },
+}
+
+pub(crate) enum CheckRequest<'a> {
+    Project {
+        application: ApplicationCheck<'a>,
+        release_archive: Option<&'a Path>,
+    },
+    Release {
+        archive: &'a Path,
+    },
+}
+
+impl CheckRequest<'_> {
+    pub(crate) const fn needs_project(&self) -> bool {
+        matches!(self, Self::Project { .. })
+    }
+}
+
+pub(crate) async fn check(
+    project: &Path,
+    terraform: &Path,
+    request: CheckRequest<'_>,
+) -> Result<CheckResult> {
     let mut passed = Vec::new();
-    for stack in std::iter::once("access").chain(Stack::ALL.map(Stack::name)) {
-        let dir = project.join("infra").join(stack);
-        if !dir.is_dir() {
-            return Err(Error::precondition_failed(format!(
-                "{} is not a backstage-aws project: {} is missing",
-                project.display(),
-                dir.display()
-            )));
+    let (application, release_archive) = match request {
+        CheckRequest::Release { archive } => {
+            passed.extend(crate::release_check::check(archive).await?);
+            return Ok(CheckResult { passed });
         }
-        for (step, args) in STEPS {
-            let name = format!("{stack}.{step}");
-            process::run(
-                terraform.as_os_str(),
-                args,
-                &dir,
-                None,
-                Duration::from_mins(15),
-            )
-            .await
-            .map_err(|error| Error::tool_failed("terraform", format!("{name}: {error}")))?;
-            passed.push(name);
+        CheckRequest::Project {
+            application,
+            release_archive,
+        } => (application, release_archive),
+    };
+    {
+        for stack in std::iter::once("access").chain(Stack::ALL.map(Stack::name)) {
+            let dir = project.join("infra").join(stack);
+            if !dir.is_dir() {
+                return Err(Error::precondition_failed(format!(
+                    "{} is not a backstage-aws project: {} is missing",
+                    project.display(),
+                    dir.display()
+                )));
+            }
+            for (step, args) in STEPS {
+                let name = format!("{stack}.{step}");
+                process::run(
+                    terraform.as_os_str(),
+                    args,
+                    &dir,
+                    None,
+                    Duration::from_mins(15),
+                )
+                .await
+                .map_err(|error| Error::tool_failed("terraform", format!("{name}: {error}")))?;
+                passed.push(name);
+            }
         }
     }
-    if app {
-        check_app(project, OsStr::new("corepack"), &mut passed).await?;
+    if let Some(archive) = release_archive {
+        passed.extend(crate::release_check::check(archive).await?);
+    }
+    match application {
+        ApplicationCheck::None => {}
+        ApplicationCheck::Build => {
+            check_app(project, OsStr::new("corepack"), &mut passed).await?;
+        }
+        ApplicationCheck::Runtime { postgres_bin } => {
+            check_app(project, OsStr::new("corepack"), &mut passed).await?;
+            passed.extend(crate::local_check::run(project, postgres_bin).await?);
+        }
     }
     Ok(CheckResult { passed })
 }
@@ -102,6 +150,13 @@ mod tests {
 
     type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
+    fn project_request() -> CheckRequest<'static> {
+        CheckRequest::Project {
+            application: ApplicationCheck::None,
+            release_archive: None,
+        }
+    }
+
     #[tokio::test]
     async fn every_stack_is_checked_and_the_first_failure_stops_the_run() -> TestResult {
         let project = tempfile::tempdir()?;
@@ -109,14 +164,48 @@ mod tests {
             fs::create_dir_all(project.path().join("infra").join(stack))?;
         }
         let terraform = Path::new(FAKE_TERRAFORM);
-        let passed = check(project.path(), terraform, false).await?.passed;
-        assert_eq!(passed.len(), 16);
-        assert_eq!(passed.first().map(String::as_str), Some("access.fmt"));
-        assert_eq!(passed.last().map(String::as_str), Some("env.test"));
+        let passed = check(project.path(), terraform, project_request())
+            .await?
+            .passed;
+        assert_eq!(
+            passed,
+            [
+                "access.fmt",
+                "access.init",
+                "access.validate",
+                "access.test",
+                "bootstrap.fmt",
+                "bootstrap.init",
+                "bootstrap.validate",
+                "bootstrap.test",
+                "base.fmt",
+                "base.init",
+                "base.validate",
+                "base.test",
+                "env.fmt",
+                "env.init",
+                "env.validate",
+                "env.test",
+            ]
+        );
+        let calls = fs::read_to_string(project.path().join("calls.log"))?;
+        let expected = ["access", "bootstrap", "base", "env"]
+            .into_iter()
+            .flat_map(|stack| {
+                [
+                    "fmt -check -recursive",
+                    "init -backend=false -input=false -lockfile=readonly",
+                    "validate -no-color",
+                    "test -no-color",
+                ]
+                .map(move |command| format!("{stack}: {command}"))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(calls.lines().collect::<Vec<_>>(), expected);
 
         fs::remove_file(project.path().join("calls.log"))?;
         fs::write(project.path().join("fail-validate"), "")?;
-        let failed = check(project.path(), terraform, false)
+        let failed = check(project.path(), terraform, project_request())
             .await
             .map(|result| result.passed);
         assert_eq!(failed.map_err(|error| error.code()), Err("TOOL_FAILED"));
@@ -157,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn a_directory_without_the_stacks_is_not_a_project() -> TestResult {
         let empty = tempfile::tempdir()?;
-        let refused = check(empty.path(), Path::new(FAKE_TERRAFORM), false)
+        let refused = check(empty.path(), Path::new(FAKE_TERRAFORM), project_request())
             .await
             .map(|result| result.passed);
         assert_eq!(

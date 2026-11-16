@@ -1,6 +1,8 @@
 output "namespace" { value = var.namespace }
 output "hostname" { value = var.hostname }
-output "url" { value = "https://${var.hostname}" }
+output "url" { value = local.url }
+output "url_scheme" { value = local.url_scheme }
+output "load_balancer_dns_name" { value = try(local.base.load_balancer_dns_name, "") }
 output "database_name" { value = var.database_name }
 output "ecs_service_name" { value = aws_ecs_service.env.name }
 output "ecs_service_arn" { value = aws_ecs_service.env.id }

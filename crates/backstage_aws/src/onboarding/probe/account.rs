@@ -180,13 +180,7 @@ pub(super) async fn identity_center(
     }
     let arn = super::parse::string(instance, "InstanceArn", "SSO Admin instance")?;
     let store = super::parse::string(instance, "IdentityStoreId", "SSO Admin instance")?;
-    let valid_arn = arn
-        .strip_prefix("arn:")
-        .and_then(|value| value.split_once(":sso:::instance/"))
-        .is_some_and(|(partition, id)| {
-            matches!(partition, "aws" | "aws-us-gov" | "aws-cn") && id.starts_with("ssoins-")
-        });
-    if !valid_arn || !store.starts_with("d-") {
+    if !valid_instance_arn(arn) || !valid_identity_store_id(store) {
         return Err(Error::state_failed(
             "SSO Admin ListInstances returned invalid instance identifiers",
         ));
@@ -195,4 +189,74 @@ pub(super) async fn identity_center(
         Stage::IdentityCenter,
         "Exactly one active IAM Identity Center instance is owned by the configured account.",
     )))
+}
+
+fn valid_instance_arn(arn: &str) -> bool {
+    let Some((prefix, identifier)) = arn.split_once(":sso:::instance/") else {
+        return false;
+    };
+    let Some(partition) = prefix.strip_prefix("arn:") else {
+        return false;
+    };
+    matches!(partition, "aws" | "aws-us-gov" | "aws-cn")
+        && identifier
+            .strip_prefix("ssoins-")
+            .is_some_and(valid_instance_identifier)
+}
+
+fn valid_identity_store_id(identifier: &str) -> bool {
+    identifier.strip_prefix("d-").is_some_and(|value| {
+        value.len() == 10 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) || valid_uuid(identifier)
+}
+
+fn valid_instance_identifier(identifier: &str) -> bool {
+    (identifier.len() == 16 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        || valid_uuid(identifier)
+}
+
+fn valid_uuid(value: &str) -> bool {
+    let mut parts = value.split('-');
+    [8, 4, 4, 4, 12].into_iter().all(|length| {
+        parts.next().is_some_and(|part| {
+            part.len() == length && part.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    }) && parts.next().is_none()
+}
+
+#[cfg(test)]
+mod identifier_tests {
+    use super::{valid_identity_store_id, valid_instance_arn};
+
+    #[test]
+    fn identity_store_ids_accept_supported_shapes_and_reject_prefixes() {
+        assert!(valid_identity_store_id("d-1234567890"));
+        assert!(valid_identity_store_id(
+            "12345678-1234-abcd-9876-1234567890ab"
+        ));
+        assert!(!valid_identity_store_id("d-"));
+        assert!(!valid_identity_store_id("d-123"));
+        assert!(!valid_identity_store_id("d-123456789g"));
+        assert!(!valid_identity_store_id(
+            "12345678-1234-abcd-9876-1234567890ax"
+        ));
+    }
+
+    #[test]
+    fn identity_center_instance_arns_require_a_complete_identifier() {
+        assert!(valid_instance_arn(
+            "arn:aws:sso:::instance/ssoins-1234567890abcdef"
+        ));
+        assert!(valid_instance_arn(
+            "arn:aws-us-gov:sso:::instance/ssoins-12345678-1234-abcd-9876-1234567890ab"
+        ));
+        assert!(!valid_instance_arn("arn:aws:sso:::instance/ssoins-"));
+        assert!(!valid_instance_arn("arn:aws:sso:::instance/ssoins-invalid"));
+        assert!(!valid_instance_arn(
+            "arn:evil:sso:::instance/ssoins-1234567890abcdef"
+        ));
+        assert!(!valid_instance_arn(
+            "arn:aws:sso:us-east-1:123456789012:instance/ssoins-1234567890abcdef"
+        ));
+    }
 }

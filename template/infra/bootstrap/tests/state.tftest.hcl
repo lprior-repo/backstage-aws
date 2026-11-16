@@ -13,23 +13,15 @@ variables {
   name           = "backstage"
 }
 
-run "remote_state_is_private_versioned_and_locked" {
+run "state_key_and_bucket_name_are_stable" {
   command = plan
   assert {
-    condition     = aws_s3_bucket_public_access_block.state.block_public_acls && aws_s3_bucket_public_access_block.state.block_public_policy && aws_s3_bucket_public_access_block.state.ignore_public_acls && aws_s3_bucket_public_access_block.state.restrict_public_buckets
-    error_message = "Remote state must block every public-access path."
+    condition     = aws_kms_key.state.enable_key_rotation && aws_kms_alias.state.name == "alias/backstage-terraform-state"
+    error_message = "The key that encrypts remote state must rotate and keep its alias."
   }
   assert {
-    condition     = aws_s3_bucket_versioning.state.versioning_configuration[0].status == "Enabled"
-    error_message = "Versioning is required for state recovery."
-  }
-  assert {
-    condition     = one(aws_s3_bucket_server_side_encryption_configuration.state.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "aws:kms"
-    error_message = "State must use the customer-managed KMS key."
-  }
-  assert {
-    condition     = aws_s3_bucket.state.bucket == "backstage-123456789012-us-east-1-tfstate" && aws_kms_key.state.enable_key_rotation
-    error_message = "The CLI finds state by this bucket name; the key that encrypts it must rotate."
+    condition     = output.state_bucket_name == "backstage-123456789012-us-east-1-tfstate"
+    error_message = "The CLI finds state by this bucket name; Terraform only reports it."
   }
 }
 

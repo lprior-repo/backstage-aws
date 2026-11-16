@@ -1,12 +1,12 @@
 # Database credentials and application secrets
 
-Every secret lives in the `base` stack and is shared by the environments in that AWS account. An environment creates no secrets, so a preview starts without anyone filling in values for it, and the GitHub deploy role has no Secrets Manager permission at all.
+The `base` stack owns the account-shared Secrets Manager values; environment stacks create none. Database credentials are generated automatically. Default previews use guest auth and need no GitHub OAuth value. Production GitHub sign-in needs OAuth credentials, and any configured plugin secret must be stored before using the plugin that needs it. The GitHub deploy role cannot read secret values.
 
 ## Database credentials
 
-RDS generates, stores, and rotates the master password in Secrets Manager. Only the db-admin task roles can read it; it is not written into Terraform state or exposed to the application.
+RDS generates, stores, and rotates the master password in Secrets Manager. Only the db-admin ECS task and execution roles can retrieve it; the portal task cannot. It is not written into Terraform state.
 
-The application-role password is generated without entering Terraform state and stored in Secrets Manager under the stack KMS key. ECS injects it into containers through the task definition's `secrets`. One application role is shared by all environments in an account: previews do not share an account with production, but preview namespaces are not isolated from each other at the role level.
+The application-role password is generated without entering Terraform state and stored in Secrets Manager under the stack KMS key. ECS injects it into containers through the task definition's `secrets`. Keep preview and production accounts separate; within one account, every environment shares this role, so preview namespaces are not isolated at the role level.
 
 Database TLS is forced by the server and verified by the application. Do not weaken certificate validation to work around a connection failure.
 
@@ -30,10 +30,13 @@ backstage-aws secrets set-identity --file FILE --approve
 
 ## Plugin secrets
 
-Name each plugin secret in `BACKSTAGE_AWS_PLUGIN_SECRETS` as `name=ENVIRONMENT_VARIABLE` or `name=ENVIRONMENT_VARIABLE:json_key`, separated by commas, for example `github-token=GITHUB_TOKEN`. `base` creates an empty secret called `<project>/plugin/<name>`; store its value once:
+Set `BACKSTAGE_AWS_PLUGIN_SECRETS` to comma-separated `name=ENV_VAR` entries (for example, `github-token=GITHUB_TOKEN`); append `:json_key` to inject one field from a JSON secret. For each `name`, `base` creates an empty secret named `$BACKSTAGE_AWS_NAME/plugin/<name>`. Include every name used by an environment in the settings supplied to `base`; otherwise that environment cannot inject it. Store each value after creation:
 
 ```sh
-aws secretsmanager put-secret-value --secret-id <project>/plugin/github-token --secret-string file://token.txt
+aws secretsmanager put-secret-value \
+  --region "$BACKSTAGE_AWS_AWS_REGION" \
+  --secret-id "$BACKSTAGE_AWS_NAME/plugin/github-token" \
+  --secret-string file://token.txt
 ```
 
-Every environment then receives the value in that environment variable. Run `base` again after changing the list, and store the value before the next deployment. Names starting with `AWS_`, `POSTGRES_`, `AUTH_`, `NODE_`, `APP_`, `BACKEND_`, or `PGSSL` are reserved.
+Plugin environment-variable names starting with `AWS_`, `POSTGRES_`, `AUTH_`, `NODE_`, `APP_`, `BACKEND_`, or `PGSSL` are reserved.
