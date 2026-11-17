@@ -1,6 +1,6 @@
 use super::{
     SetupArgs,
-    model::{Check, ManualCheck, Stage, Status},
+    model::{Check, Stage, Status},
 };
 use crate::{
     error::{Error, Result},
@@ -13,7 +13,6 @@ use std::time::Duration;
 mod account;
 mod aws;
 mod command;
-mod dns;
 mod local;
 mod parse;
 #[cfg(test)]
@@ -41,78 +40,16 @@ pub(super) async fn collect(settings: &Settings, args: &SetupArgs) -> Result<Vec
         Err(check) => return Ok(append(checks, check)),
     };
     checks.push(account);
-    let summary =
-        account::account_summary(&args.aws_cli, args.profile.as_deref(), settings).await?;
-    let stopped = summary
-        .iter()
-        .any(|check| matches!(&check.status, Status::ActionRequired | Status::Blocked));
-    checks.extend(summary);
-    if stopped {
-        return Ok(checks);
-    }
     let organization =
         match account::organization(&args.aws_cli, args.profile.as_deref(), settings).await? {
             Ok(check) => check,
             Err(check) => return Ok(append(checks, check)),
         };
     checks.push(organization);
-    if !args.confirmed.contains(&ManualCheck::OrganizationEmail) {
-        return Ok(append(
-            checks,
-            action_required(
-                Stage::OrganizationEmail,
-                "Confirm that the AWS Organizations management account email is verified by the account owner.",
-            ),
-        ));
-    }
-    checks.push(acknowledged(
-        Stage::OrganizationEmail,
-        "Organization management-account email verification is acknowledged by the owner.",
-    ));
-    collect_identity_center(settings, args, checks).await
+    collect_deployment(settings, checks).await
 }
 
-async fn collect_identity_center(
-    settings: &Settings,
-    args: &SetupArgs,
-    mut checks: Vec<Check>,
-) -> Result<Vec<Check>> {
-    if settings.aws_region.trim().is_empty() {
-        return Ok(append(
-            checks,
-            action_required(
-                Stage::IdentityCenter,
-                "Set a non-empty AWS region with `--aws-region` before regional IAM Identity Center discovery.",
-            ),
-        ));
-    }
-    let instance =
-        match account::identity_center(&args.aws_cli, args.profile.as_deref(), settings).await? {
-            Ok(check) => check,
-            Err(check) => return Ok(append(checks, check)),
-        };
-    checks.push(instance);
-    if !args.confirmed.contains(&ManualCheck::IdentityCenterMfa) {
-        return Ok(append(
-            checks,
-            action_required(
-                Stage::IdentityCenterMfa,
-                "Confirm in the IAM Identity Center console that MFA is required by its configured authentication policy.",
-            ),
-        ));
-    }
-    checks.push(acknowledged(
-        Stage::IdentityCenterMfa,
-        "Identity Center MFA policy is acknowledged by the owner; no AWS API proof is available.",
-    ));
-    collect_deployment(settings, args, checks).await
-}
-
-async fn collect_deployment(
-    settings: &Settings,
-    args: &SetupArgs,
-    mut checks: Vec<Check>,
-) -> Result<Vec<Check>> {
+async fn collect_deployment(settings: &Settings, mut checks: Vec<Check>) -> Result<Vec<Check>> {
     let validated = match settings.clone().validate() {
         Ok(validated) => validated,
         Err(error) => {
@@ -139,11 +76,6 @@ async fn collect_deployment(
         "Deployment settings validated.",
     ));
 
-    let zone = match aws::dns(&args.aws_cli, args.profile.as_deref(), settings).await? {
-        Ok(check) => check,
-        Err(check) => return Ok(append(checks, check)),
-    };
-    checks.push(zone);
     let project = match local::project(&settings.project)? {
         Ok(check) => check,
         Err(check) => return Ok(append(checks, check)),
@@ -180,14 +112,6 @@ fn action_required(stage: Stage, detail: impl Into<String>) -> Check {
     Check {
         stage,
         status: Status::ActionRequired,
-        detail: detail.into(),
-    }
-}
-
-fn acknowledged(stage: Stage, detail: impl Into<String>) -> Check {
-    Check {
-        stage,
-        status: Status::Acknowledged,
         detail: detail.into(),
     }
 }

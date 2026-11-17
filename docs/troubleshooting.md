@@ -12,15 +12,15 @@ Every command writes one JSON document to stdout; only `--help` and `--version` 
 | `4` | `TOOL_FAILED`, `AWS_FAILED`, `GITHUB_FAILED`, `STATE_FAILED`, `DB_TASK_FAILED` | Inspect the code/message and stderr. Resolve the tool, permission, API, state or database-task failure; check for partial remote changes before retrying. |
 | `5` | `REMOTE_TIMEOUT` | The remote operation may still be running. Inspect the AWS resource and operation status before retrying; do not assume it was cancelled. |
 
-`setup` deliberately stops at the first incomplete check. Its blocked report uses exit 3 and includes the checked stages, next action and resumable argv. `organization-email` and `identity-center-mfa` are manual confirmations, not API-verified facts.
+`setup` deliberately stops at the first incomplete check. Its blocked report uses exit 3 and includes the checked stages, next action and resumable argv.
 
 ## Common failures
 
 | Symptom | Check / action |
 |---|---|
-| Setup is blocked on credentials or account | Use a configured non-root IAM Identity Center profile; check `aws sts get-caller-identity --profile "$AWS_PROFILE"` and the exact target account ID. Root MFA must be on and root access keys absent. |
-| Setup requests an account action | Follow its `next` instructions in order. Verify the Organization management-account email and required Identity Center MFA in the console before supplying the matching `--confirm` value. |
-| Setup rejects settings or DNS | Load the generated `environments/preview.env`; provide every required setting (domain and zone ID are both set or both empty) and at least one allowed IPv4 CIDR. If a domain is set, ensure the public Route 53 zone is delegated to its assigned name servers; compare `dig +short NS DOMAIN` with `aws route53 get-hosted-zone`. |
+| Setup is blocked on credentials or account | Use a configured IAM Identity Center profile; check `aws sts get-caller-identity --profile "$AWS_PROFILE"` and the exact target account ID. |
+| Setup requests an account action | Follow its `next` instructions in order, then rerun the `resume` argv. |
+| Setup rejects settings | Load the generated `environments/preview.env`; provide every required setting (domain and zone ID are both set or both empty) and at least one allowed IPv4 CIDR. For a domain, verify the public Route 53 zone is delegated to its assigned name servers (`setup` does not check this); compare `dig +short NS DOMAIN` with `aws route53 get-hosted-zone`. |
 | Terraform version is rejected | Install exactly 1.17.2. `BACKSTAGE_AWS_TERRAFORM` can select another executable path, not another version. |
 | Docker or image build fails | Docker: check `docker buildx version` and `docker info`, and that the daemon is reachable. Podman (`--container-engine podman`): check `podman info`. Run them as the same user that runs the CLI. |
 | GitHub release download or attestation fails | Confirm generated workflows request the matching tag and repository and that the release asset/attestation verifies. Ask the maintainer to repair a missing or invalid release; do not bypass verification. |

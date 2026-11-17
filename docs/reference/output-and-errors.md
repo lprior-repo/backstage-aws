@@ -13,7 +13,7 @@
 
 Success keys: `ok`, `command`, `result`; failure keys: `ok`, `command`, `error` (`code`, `message`, `retryable`). Result fields vary by command. Examples are protocol shapes, not live AWS/GitHub results.
 
-Blocked `setup` adds `error.details`: ordered `checks`, one `next` action, `resume` argv and non-secret `environment`. Status `acknowledged` is an owner attestation; `verified` is observed evidence. Reruns rediscover state; no completion journal.
+Blocked `setup` adds `error.details`: ordered `checks`, one `next` action, `resume` argv and non-secret `environment`. Status `verified` is observed evidence; `action_required`, `blocked` and `not_checked` mean the stage is incomplete. Reruns rediscover state; no completion journal.
 
 ## Exit and error codes
 

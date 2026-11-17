@@ -4,7 +4,7 @@ This creates billable AWS resources. Start in a dedicated preview account, not p
 
 ## 1. Prepare the account, DNS and GitHub
 
-Complete the [prerequisites](prerequisites.md) first. You need a non-root IAM Identity Center profile, optionally a public Route 53 zone delegated to its assigned name servers (needed only for a domain), GitHub repository access, Docker Engine with Buildx or Podman, and Terraform 1.17.2. The owner must create the account prerequisites before the CLI can provision resources.
+Complete the [prerequisites](prerequisites.md) first. You need an assumed-role AWS profile for the target account (IAM Identity Center is recommended; root is accepted but discouraged), optionally a public Route 53 zone delegated to its assigned name servers (needed only for a domain), GitHub repository access, Docker Engine with Buildx or Podman, and Terraform 1.17.2. The owner must create the account prerequisites before the CLI can provision resources.
 
 Generated GitHub workflows download and verify the matching CLI release. Confirm that release `v0.1.0` exists before deploying:
 
@@ -26,7 +26,7 @@ The repository pins Rust 1.99.1. This installs the CLI from source; it does not 
 
 ## 3. Set deployment settings
 
-Log in to GitHub first. Set the values below for your account and the **new Backstage repository**, not this CLI repository. The AWS profile must be configured for the scoped non-root Identity Center user.
+Log in to GitHub first. Set the values below for your account and the **new Backstage repository**, not this CLI repository. The AWS profile must be configured for the target account (assumed role recommended).
 
 ```sh
 export AWS_PROFILE=backstage-preview
@@ -64,9 +64,9 @@ The generated file contains non-secret settings. Source only this trusted file. 
 backstage-aws setup --profile "$AWS_PROFILE"
 ```
 
-`setup` is read-only and reports one next action at a time. It validates network CIDR syntax first; invalid CIDRs return `INVALID_INPUT` with exit code 2 before discovery. An incomplete guided check returns `SETUP_BLOCKED` with exit code 3; that is expected. Follow `error.details.next`, complete the action, then run the exact argv in `error.details.resume`. The two `--confirm` values are owner attestations: use `organization-email` only after verifying the Organizations management-account email, and `identity-center-mfa` only after confirming the Identity Center policy requires MFA. These are not API-verified facts.
+`setup` is read-only and reports one next action at a time. It validates network CIDR syntax first; invalid CIDRs return `INVALID_INPUT` with exit code 2 before discovery. An incomplete guided check returns `SETUP_BLOCKED` with exit code 3; that is expected. Follow `error.details.next`, complete the action, then run the exact argv in `error.details.resume`.
 
-After CIDR validation, the probe order is AWS CLI v2, credentials/profile, target account, root MFA and absence of root access keys, Organizations, the email attestation, IAM Identity Center, the MFA attestation, remaining deployment settings, DNS delegation, generated project directories, and local tools. When complete, `setup` gives `backstage-aws doctor` as the next command. Run it; it checks tools, AWS identity and GitHub repository access.
+After CIDR validation, the probe order is AWS CLI v2, credentials/profile, target account, Organizations, remaining deployment settings, generated project directories, and local tools. When complete, `setup` gives `backstage-aws doctor` as the next command. Run it; it checks tools, AWS identity and GitHub repository access.
 
 ## 6. Validate locally and approve provisioning
 

@@ -7,14 +7,13 @@ Use a dedicated **preview sandbox account**; keep production in a separate accou
 Have the following ready before deployment:
 
 - A 12-digit target AWS account ID and deployment region.
-- An AWS Organization with the target account as its management account; the owner must verify that account's management email.
-- Root-user MFA enabled and no root access keys. Use a short-lived, non-root role for CLI work.
-- IAM Identity Center enabled with exactly one active instance owned by the target account, plus an existing user whose authentication policy requires MFA.
+- An AWS Organization with the target account as its management account. Verify that account's management email in the console; `setup` does not check it.
+- IAM Identity Center enabled, plus an existing user whose authentication policy requires MFA.
 - A reviewed, scoped provisioner permission set assigned to that user. An account owner applies the separate `access` stack below; it does not enable Identity Center.
 - Optional: a public Route 53 hosted zone for the deployment domain and its delegated name servers. Without one, set both domain settings empty for domain-free mode (plain HTTP to the ingress allow-list only; add a domain later by re-applying `base`).
 - A GitHub token with repository and workflow-file access, plus a configured Git author name and email.
 
-`backstage-aws setup --profile backstage-preview` first validates network CIDRs; invalid values return `INVALID_INPUT` before the guided checks. It then checks the CLI and profile, exact target account, root-account safeguards, Organizations and Identity Center, then asks for two manual attestations. Only after those does it validate remaining settings, DNS delegation, generated project files and local tools. It stops at the first incomplete step and returns `error.details.next` plus `error.details.resume`. The confirmations are human attestations, not AWS API evidence.
+`backstage-aws setup --profile backstage-preview` first validates network CIDRs; invalid values return `INVALID_INPUT` before the guided checks. It then checks the CLI and profile, the exact target account and Organizations, then validates remaining settings, generated project files and local tools. It stops at the first incomplete step and returns `error.details.next` plus `error.details.resume`.
 
 ## Create the scoped Identity Center permission set
 
@@ -56,7 +55,7 @@ export AWS_PROFILE=backstage-preview
 aws sts get-caller-identity
 ```
 
-Confirm the caller is the intended account and assumed-role identity, not root. Never store AWS access keys in the repository or GitHub.
+Confirm the caller is the intended account. Prefer an assumed-role identity over root; the CLI accepts either for the target account. Never store AWS access keys in the repository or GitHub.
 
 ## DNS (optional; only with a domain)
 
@@ -69,7 +68,7 @@ aws route53 get-hosted-zone --id "$BACKSTAGE_AWS_ROUTE53_ZONE_ID" \
   --query 'DelegationSet.NameServers' --output text
 ```
 
-`setup` compares the public zone with its delegation before deployment. Certificate validation cannot finish until delegation is correct. Avoid conflicting apex or wildcard records.
+`setup` does not check delegation; verify it yourself before deployment. Certificate validation cannot finish until delegation is correct. Avoid conflicting apex or wildcard records.
 
 ## GitHub
 
@@ -101,7 +100,7 @@ If `https://token.actions.githubusercontent.com` already exists, set `BACKSTAGE_
 | AWS CLI | Version 2 | Read-only setup checks and AWS operations |
 | Docker Engine with Buildx, or Podman | Docker: Buildx available, daemon reachable. Podman (`--container-engine podman`): `podman info` succeeds (rootless is fine) | Setup/doctor checks and the initial image build in `up` |
 | Git | Available; configure `user.name` and `user.email` before the first commit | Setup/doctor check Git; `up` commits and publishes the project |
-| `dig` | Available on `PATH` | Checking public DNS delegation |
+| `dig` | Available on `PATH` | Manual public DNS delegation check in the section above; the CLI does not run it |
 | Node.js and Yarn | Node 24.22.1; bundled Yarn 4.13.0 | Local app development and `check --app` |
 | PostgreSQL tools | PostgreSQL 16 client/server tools | Local development and `check --runtime`; not required for AWS deployment |
 | GitHub CLI | Recommended for the examples | Login, token retrieval and pull-request creation |

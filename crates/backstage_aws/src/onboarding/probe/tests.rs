@@ -111,17 +111,17 @@ fn error_codes_are_extracted_without_stderr_payload() -> TestResult {
 }
 
 #[tokio::test]
-async fn identity_rejects_root_and_wrong_account() -> TestResult {
+async fn identity_accepts_root_for_configured_account_and_rejects_wrong_account() -> TestResult {
     let directory = TempDir::new()?;
     let root_cli = fake_cli(
         &directory,
         "printf '%s' '{\"UserId\":\"123\",\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:root\"}'",
     )?;
-    let root = blocked(
-        passed(aws::identity(&root_cli, None, &settings()).await?)?.1,
-        "root must block",
-    )?;
-    assert_eq!(root.status, Status::ActionRequired);
+    let (_, root_account) = passed(aws::identity(&root_cli, None, &settings()).await?)?;
+    assert!(
+        matches!(&root_account, Ok(check) if check.status == Status::Verified),
+        "root must verify for the configured account"
+    );
     let wrong_cli = fake_cli(
         &directory,
         "printf '%s' '{\"UserId\":\"AROATEST:session\",\"Account\":\"999999999999\",\"Arn\":\"arn:aws:sts::999999999999:assumed-role/test/session\"}'",
@@ -252,158 +252,20 @@ fn project_probe_does_not_create_or_overwrite_directories() -> TestResult {
 }
 
 #[tokio::test]
-async fn account_and_identity_center_safety_evidence_blocks_unsafe_states() -> TestResult {
+async fn organization_outside_the_configured_account_is_blocked() -> TestResult {
     use crate::onboarding::model::{Stage, Status};
-    let cases = [
-        (
-            "iam/get-account-summary) echo '{\"AccountMFAEnabled\":0,\"AccountAccessKeysPresent\":0}';;",
-            Stage::RootMfa,
+    let response = r#"{"Organization":{"Id":"o-example","MasterAccountId":"999999999999"}}"#;
+    let directory = TempDir::new()?;
+    let cli = fake_cli(
+        &directory,
+        &format!(
+            "case \"$1/$2\" in organizations/describe-organization) echo '{response}';; *) exit 64;; esac"
         ),
-        (
-            "iam/get-account-summary) echo '{\"AccountMFAEnabled\":1,\"AccountAccessKeysPresent\":1}';;",
-            Stage::RootAccessKeys,
-        ),
-    ];
-    for (response, stage) in cases {
-        let directory = TempDir::new()?;
-        let cli = fake_cli(
-            &directory,
-            &format!("case \"$1/$2\" in {response} *) exit 64;; esac"),
-        )?;
-        let result = account::account_summary(&cli, None, &settings()).await?;
-        assert_eq!(
-            result.last().map(|check| (check.stage, check.status)),
-            Some((stage, Status::ActionRequired))
-        );
-    }
-
-    let cases = [
-        (
-            r#"{"Organization":{"Id":"o-example","MasterAccountId":"999999999999"}}"#,
-            Stage::Organization,
-        ),
-        (
-            r#"{"Instances":[{"InstanceArn":"arn:aws:sso:::instance/ssoins-1234567890abcdef","IdentityStoreId":"d-1234567890","OwnerAccountId":"999999999999","Status":"ACTIVE"}]}"#,
-            Stage::IdentityCenter,
-        ),
-        (
-            r#"{"Instances":[{"InstanceArn":"arn:aws:sso:::instance/ssoins-1234567890abcdef","IdentityStoreId":"d-1234567890","OwnerAccountId":"123456789012","Status":"INACTIVE"}]}"#,
-            Stage::IdentityCenter,
-        ),
-        (
-            r#"{"Instances":[{"InstanceArn":"arn:aws:sso:::instance/ssoins-1234567890abcdef","IdentityStoreId":"d-1234567890","OwnerAccountId":"123456789012","Status":"ACTIVE"}],"NextToken":"next"}"#,
-            Stage::IdentityCenter,
-        ),
-        (
-            r#"{"Instances":[{"InstanceArn":"arn:aws:sso:::instance/ssoins-1234567890abcdef","IdentityStoreId":"d-1234567890","OwnerAccountId":"123456789012","Status":"ACTIVE"},{"InstanceArn":"arn:aws:sso:::instance/ssoins-1234567890abcdff","IdentityStoreId":"d-1234567891","OwnerAccountId":"123456789012","Status":"ACTIVE"}]}"#,
-            Stage::IdentityCenter,
-        ),
-    ];
-    for (response, stage) in cases {
-        let directory = TempDir::new()?;
-        let operation = if stage == Stage::Organization {
-            "organizations/describe-organization"
-        } else {
-            "sso-admin/list-instances"
-        };
-        let cli = fake_cli(
-            &directory,
-            &format!("case \"$1/$2\" in {operation}) echo '{response}';; *) exit 64;; esac"),
-        )?;
-        let check = if stage == Stage::Organization {
-            account::organization(&cli, None, &settings()).await?.err()
-        } else {
-            account::identity_center(&cli, None, &settings())
-                .await?
-                .err()
-        };
-        assert_eq!(
-            check.map(|value| (value.stage, value.status)),
-            Some((stage, Status::Blocked))
-        );
-    }
-    Ok(())
-}
-
-#[tokio::test]
-async fn dns_delegation_distinguishes_required_actions_from_external_failures() -> TestResult {
-    use crate::onboarding::model::{Stage, Status};
-    let valid = r#"{"HostedZone":{"Id":"Z12345","Name":"example.com.","Config":{"PrivateZone":false}},"DelegationSet":{"NameServers":["ns-1.example.net.","ns-2.example.net."]}}"#;
-    let cases = [
-        (
-            r#"{"HostedZone":{"Id":"Z12345","Name":"example.com.","Config":{"PrivateZone":true}},"DelegationSet":{"NameServers":["ns-1.example.net."]}}"#,
-            "printf '%s\\n' 'ns-1.example.net.'",
-            0,
-            Some(Status::ActionRequired),
-            None,
-        ),
-        (
-            r#"{"HostedZone":{"Id":"ZOTHER","Name":"example.com.","Config":{"PrivateZone":false}},"DelegationSet":{"NameServers":["ns-1.example.net."]}}"#,
-            "printf '%s\\n' 'ns-1.example.net.'",
-            0,
-            None,
-            Some("STATE_FAILED"),
-        ),
-        (
-            r#"{"HostedZone":{"Id":"Z12345","Name":"other.net.","Config":{"PrivateZone":false}},"DelegationSet":{"NameServers":["ns-1.example.net."]}}"#,
-            "printf '%s\\n' 'ns-1.example.net.'",
-            0,
-            Some(Status::ActionRequired),
-            None,
-        ),
-        (
-            r#"{"HostedZone":{"Id":"Z12345","Name":"example.com.","Config":{"PrivateZone":false}},"DelegationSet":{"NameServers":[]}}"#,
-            "printf '%s\\n' 'ns-1.example.net.'",
-            0,
-            None,
-            Some("STATE_FAILED"),
-        ),
-        (valid, "printf ''", 0, Some(Status::ActionRequired), None),
-        (
-            valid,
-            "printf '%s\\n' 'ns-other.example.net.'",
-            0,
-            Some(Status::ActionRequired),
-            None,
-        ),
-        (
-            valid,
-            "printf '%s\\n' 'not a name server'",
-            0,
-            None,
-            Some("STATE_FAILED"),
-        ),
-        (valid, "exit 1", 1, None, Some("TOOL_FAILED")),
-    ];
-    for (zone, dig_body, dig_exit, expected_status, expected_code) in cases {
-        let directory = TempDir::new()?;
-        let aws = fake_cli(
-            &directory,
-            &format!(
-                "case \"$1/$2\" in route53/get-hosted-zone) echo '{zone}';; *) exit 64;; esac"
-            ),
-        )?;
-        let dig = directory.path().join("dig");
-        fs::write(&dig, format!("#!/bin/sh\n{dig_body}\nexit {dig_exit}\n"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut permissions = fs::metadata(&dig)?.permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&dig, permissions)?;
-        }
-        let outcome = dns::delegation_with_dig(&aws, None, &settings(), &dig).await;
-        match (outcome, expected_status, expected_code) {
-            (Ok(Err(check)), Some(status), None) => {
-                assert_eq!((check.stage, check.status), (Stage::DnsDelegation, status));
-            }
-            (Err(error), None, Some(code)) => assert_eq!(error.code(), code),
-            (other, expected, code) => {
-                return Err(
-                    format!("unexpected DNS result: {other:?}; {expected:?}; {code:?}").into(),
-                );
-            }
-        }
-    }
+    )?;
+    let check = account::organization(&cli, None, &settings()).await?.err();
+    assert_eq!(
+        check.map(|value| (value.stage, value.status)),
+        Some((Stage::Organization, Status::Blocked))
+    );
     Ok(())
 }

@@ -17,18 +17,6 @@ pub(super) fn object<'a>(
     Ok(object)
 }
 
-pub(super) fn object_value<'a>(
-    value: Option<&'a Value>,
-    allowed: &[&str],
-    label: &str,
-) -> Result<&'a Map<String, Value>> {
-    object(
-        value.ok_or_else(|| Error::state_failed(format!("{label} was missing")))?,
-        allowed,
-        label,
-    )
-}
-
 pub(super) fn value<'a>(
     object: &'a Map<String, Value>,
     key: &str,
@@ -47,22 +35,6 @@ pub(super) fn string<'a>(
     value(object, key, label)?
         .as_str()
         .ok_or_else(|| Error::state_failed(format!("{label} field {key} was not a string")))
-}
-
-pub(super) fn integer(object: &Map<String, Value>, key: &str, label: &str) -> Result<u64> {
-    value(object, key, label)?.as_u64().ok_or_else(|| {
-        Error::state_failed(format!("{label} field {key} was not an unsigned integer"))
-    })
-}
-
-pub(super) fn array<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-    label: &str,
-) -> Result<&'a Vec<Value>> {
-    value(object, key, label)?
-        .as_array()
-        .ok_or_else(|| Error::state_failed(format!("{label} field {key} was not an array")))
 }
 
 pub(super) fn error_code(stderr: &str) -> Option<String> {

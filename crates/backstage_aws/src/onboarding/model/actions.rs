@@ -1,4 +1,4 @@
-use super::{Action, Check, ManualCheck, Stage};
+use super::{Action, Check, Stage};
 use crate::settings::Settings;
 pub(super) fn doctor_action(settings: &Settings) -> crate::error::Result<Action> {
     let mut command = vec![String::from("backstage-aws"), String::from("doctor")];
@@ -26,9 +26,6 @@ pub(super) fn resume_command(
     if let Some(profile) = &args.profile {
         append_pair(&mut command, "--profile", profile);
     }
-    args.confirmed.iter().for_each(|check| {
-        append_pair(&mut command, "--confirm", confirm_name(*check));
-    });
     Ok(command)
 }
 
@@ -123,13 +120,6 @@ fn append_pair(command: &mut Vec<String>, flag: &str, value: impl std::fmt::Disp
     command.push(format!("{flag}={value}"));
 }
 
-const fn confirm_name(check: ManualCheck) -> &'static str {
-    match check {
-        ManualCheck::OrganizationEmail => "organization-email",
-        ManualCheck::IdentityCenterMfa => "identity-center-mfa",
-    }
-}
-
 pub(super) fn action(settings: &Settings, args: &super::super::SetupArgs, check: &Check) -> Action {
     if check.status == super::Status::Blocked {
         return Action {
@@ -159,24 +149,6 @@ pub(super) fn action(settings: &Settings, args: &super::super::SetupArgs, check:
             ));
             ("Set the target AWS account", None, None)
         }
-        Stage::RootMfa => {
-            instructions.push(String::from(
-                "Enable MFA for the AWS root user in the AWS console, then rerun setup.",
-            ));
-            (
-                "Enable root MFA",
-                None,
-                Some("https://console.aws.amazon.com/iam/home#/security_credentials"),
-            )
-        }
-        Stage::RootAccessKeys => {
-            instructions.push(String::from("Remove root access keys in the AWS console; use an assumed IAM Identity Center role instead."));
-            (
-                "Remove root access keys",
-                None,
-                Some("https://console.aws.amazon.com/iam/home#/security_credentials"),
-            )
-        }
         Stage::Organization => {
             instructions.push(String::from("Create or select the intended AWS Organization in the AWS console, then rerun setup."));
             instructions.push(String::from("Creating an organization may change Free Tier billing or expire credits; review that impact first."));
@@ -186,35 +158,7 @@ pub(super) fn action(settings: &Settings, args: &super::super::SetupArgs, check:
                 Some("https://console.aws.amazon.com/organizations/"),
             )
         }
-        Stage::OrganizationEmail => {
-            instructions.push(String::from("Verify the AWS Organizations management-account email in the console, then rerun with --confirm organization-email."));
-            (
-                "Verify organization email",
-                None,
-                Some("https://console.aws.amazon.com/organizations/"),
-            )
-        }
-        Stage::IdentityCenter => {
-            instructions.push(String::from("Enable IAM Identity Center in the target account and region; create the user, require MFA, and assign a reviewed scoped permission set."));
-            (
-                "Set up IAM Identity Center",
-                None,
-                Some("https://console.aws.amazon.com/singlesignon/"),
-            )
-        }
-        Stage::IdentityCenterMfa => {
-            instructions.push(String::from("Require MFA for the Identity Center user, then rerun with --confirm identity-center-mfa."));
-            (
-                "Confirm Identity Center MFA",
-                None,
-                Some("https://console.aws.amazon.com/singlesignon/"),
-            )
-        }
         Stage::DeploymentSettings => ("Fix deployment settings", None, None),
-        Stage::DnsDelegation => {
-            instructions.push(format!("Delegate the public DNS zone for {} to the nameservers discovered for its hosted zone.", settings.domain_name));
-            ("Delegate the public DNS zone", None, None)
-        }
         Stage::Project => {
             instructions.push(format!(
                 "Use the configured project directory: {}.",
@@ -244,7 +188,7 @@ fn credentials_action(
     if let Some(profile) = &args.profile {
         command.extend([String::from("--profile"), profile.clone()]);
     }
-    instructions.push(String::from("Sign in with an assumed role through AWS IAM Identity Center; do not use root or long-lived IAM user keys."));
+    instructions.push(String::from("Sign in with an assumed role through AWS IAM Identity Center; do not use long-lived IAM user keys."));
     (
         "Configure AWS sign-in",
         Some(command),

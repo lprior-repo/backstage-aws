@@ -50,7 +50,6 @@ fn args() -> super::super::SetupArgs {
     super::super::SetupArgs {
         aws_cli: PathBuf::from("/opt/aws cli"),
         profile: Some(String::from("work profile")),
-        confirmed: Vec::new(),
     }
 }
 
@@ -65,25 +64,8 @@ fn check(stage: Stage, status: Status) -> Check {
 fn all_successful_checks() -> Vec<Check> {
     Stage::ORDER
         .iter()
-        .map(|stage| {
-            let status = if stage.manual() {
-                Status::Acknowledged
-            } else {
-                Status::Verified
-            };
-            check(*stage, status)
-        })
+        .map(|stage| check(*stage, Status::Verified))
         .collect()
-}
-
-fn confirmed_args() -> super::super::SetupArgs {
-    super::super::SetupArgs {
-        confirmed: vec![
-            ManualCheck::OrganizationEmail,
-            ManualCheck::IdentityCenterMfa,
-        ],
-        ..args()
-    }
 }
 
 #[test]
@@ -129,55 +111,23 @@ fn duplicate_or_ambiguous_evidence_is_rejected() {
             .map(|e| e.code()),
         Some("INVALID_INPUT")
     );
-    let illegal_ack = vec![check(Stage::Account, Status::Acknowledged)];
-    assert_eq!(
-        report(&settings(), &args(), illegal_ack)
-            .err()
-            .map(|e| e.code()),
-        Some("INVALID_INPUT")
-    );
-}
-
-#[test]
-fn acknowledgements_require_matching_explicit_manual_confirmation() -> TestResult {
-    let manual = vec![check(Stage::OrganizationEmail, Status::Acknowledged)];
-    assert_eq!(
-        report(&settings(), &args(), manual).err().map(|e| e.code()),
-        Some("INVALID_INPUT")
-    );
-    let checks = vec![check(Stage::OrganizationEmail, Status::Acknowledged)];
-    let result = report(&settings(), &confirmed_args(), checks)?;
-    assert_eq!(
-        result.checks.get(6).map(|item| item.status),
-        Some(Status::Acknowledged)
-    );
-    assert_eq!(result.status, ReportStatus::Blocked);
-    Ok(())
 }
 
 #[test]
 fn partial_observations_never_create_a_ready_report() -> TestResult {
     let checks = Stage::ORDER
         .iter()
-        .filter(|stage| !stage.manual())
+        .filter(|stage| **stage != Stage::Account)
         .map(|stage| check(*stage, Status::Verified))
         .collect();
-    let result = report(&settings(), &confirmed_args(), checks)?;
+    let result = report(&settings(), &args(), checks)?;
     assert_eq!(result.status, ReportStatus::Blocked);
-    assert_eq!(
-        result.next.as_ref().map(|action| action.title.as_str()),
-        Some("Verify organization email")
-    );
-    assert_eq!(
-        result.checks.get(6).map(|item| item.status),
-        Some(Status::NotChecked)
-    );
     Ok(())
 }
 
 #[test]
-fn complete_readiness_means_all_live_checks_plus_acknowledged_manual_gates() -> TestResult {
-    let result = report(&settings(), &confirmed_args(), all_successful_checks())?;
+fn complete_readiness_means_every_live_check_is_verified() -> TestResult {
+    let result = report(&settings(), &args(), all_successful_checks())?;
     assert_eq!(result.status, ReportStatus::ReadyForDoctor);
     let doctor = result.next.ok_or("ready report directs user to doctor")?;
     assert_eq!(doctor.title, "Run doctor");
@@ -193,12 +143,8 @@ fn complete_readiness_means_all_live_checks_plus_acknowledged_manual_gates() -> 
     );
     assert_eq!(result.checks.len(), Stage::ORDER.len());
     assert_eq!(
-        result.checks.get(6).map(|item| item.status),
-        Some(Status::Acknowledged)
-    );
-    assert_eq!(
-        result.checks.get(8).map(|item| item.status),
-        Some(Status::Acknowledged)
+        result.checks.get(4).map(|item| item.status),
+        Some(Status::Verified)
     );
     Ok(())
 }
@@ -209,7 +155,7 @@ fn resume_arguments_roundtrip_through_the_real_cli_with_leading_hyphen_values() 
 
     let mut source = settings();
     source.project = PathBuf::from("-portal project");
-    let mut setup = confirmed_args();
+    let mut setup = args();
     setup.profile = Some(String::from("-work profile"));
     let report = report(&source, &setup, Vec::new())?;
     let parsed = crate::cli::Cli::try_parse_from(report.resume)?;
@@ -222,7 +168,6 @@ fn resume_arguments_roundtrip_through_the_real_cli_with_leading_hyphen_values() 
     };
     assert_eq!(parsed_setup.profile.as_deref(), Some("-work profile"));
     assert_eq!(parsed_setup.aws_cli, PathBuf::from("/opt/aws cli"));
-    assert_eq!(parsed_setup.confirmed, setup.confirmed);
     Ok(())
 }
 
@@ -232,7 +177,7 @@ fn resume_preserves_fck_nat_and_the_explicit_ami_pin() -> TestResult {
     source.network.nat_gateways = 0;
     source.network.fck_nat = true;
     source.network.fck_nat_ami_id = Some("ami-1234567890abcdef0".into());
-    let result = report(&source, &confirmed_args(), Vec::new())?;
+    let result = report(&source, &args(), Vec::new())?;
     assert!(
         result
             .resume

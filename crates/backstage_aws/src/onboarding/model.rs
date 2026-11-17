@@ -1,59 +1,34 @@
 mod actions;
 use actions::{action, doctor_action, resume_command};
 
-use clap::ValueEnum;
 use serde::Serialize;
 use std::collections::BTreeMap;
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ValueEnum)]
-#[serde(rename_all = "kebab-case")]
-#[value(rename_all = "kebab-case")]
-pub(crate) enum ManualCheck {
-    OrganizationEmail,
-    IdentityCenterMfa,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stage {
     AwsCli,
     Credentials,
     Account,
-    RootMfa,
-    RootAccessKeys,
     Organization,
-    OrganizationEmail,
-    IdentityCenter,
-    IdentityCenterMfa,
     DeploymentSettings,
-    DnsDelegation,
     Project,
     LocalTools,
 }
 impl Stage {
-    pub(crate) const ORDER: [Self; 13] = [
+    pub(crate) const ORDER: [Self; 7] = [
         Self::AwsCli,
         Self::Credentials,
         Self::Account,
-        Self::RootMfa,
-        Self::RootAccessKeys,
         Self::Organization,
-        Self::OrganizationEmail,
-        Self::IdentityCenter,
-        Self::IdentityCenterMfa,
         Self::DeploymentSettings,
-        Self::DnsDelegation,
         Self::Project,
         Self::LocalTools,
     ];
-
-    const fn manual(self) -> bool {
-        matches!(self, Self::OrganizationEmail | Self::IdentityCenterMfa)
-    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Status {
     Verified,
-    Acknowledged,
     ActionRequired,
     Blocked,
     NotChecked,
@@ -94,7 +69,6 @@ pub(crate) fn report(
     checks: Vec<Check>,
 ) -> crate::error::Result<Report> {
     let ordered = ordered_checks(checks)?;
-    validate_acknowledgements(&ordered, args)?;
     let next_check = ordered.iter().find(|check| !is_complete(check));
     let ready = ordered.len() == Stage::ORDER.len() && next_check.is_none();
     let next = match next_check {
@@ -118,31 +92,6 @@ pub(crate) fn report(
     })
 }
 
-fn validate_acknowledgements(
-    checks: &[Check],
-    args: &super::SetupArgs,
-) -> crate::error::Result<()> {
-    let unconfirmed = checks.iter().any(|check| {
-        check.status == Status::Acknowledged
-            && !args
-                .confirmed
-                .iter()
-                .any(|confirmed| stage_matches(check.stage, *confirmed))
-    });
-    if unconfirmed {
-        return Err(crate::error::Error::invalid_input(
-            "acknowledged onboarding check lacks explicit confirmation",
-        ));
-    }
-    Ok(())
-}
-const fn stage_matches(stage: Stage, confirmation: ManualCheck) -> bool {
-    matches!(
-        (stage, confirmation),
-        (Stage::OrganizationEmail, ManualCheck::OrganizationEmail)
-            | (Stage::IdentityCenterMfa, ManualCheck::IdentityCenterMfa)
-    )
-}
 fn ordered_checks(mut checks: Vec<Check>) -> crate::error::Result<Vec<Check>> {
     checks.sort_unstable_by_key(|check| check.stage);
     if checks.windows(2).any(|pair| {
@@ -152,14 +101,6 @@ fn ordered_checks(mut checks: Vec<Check>) -> crate::error::Result<Vec<Check>> {
     }) {
         return Err(crate::error::Error::invalid_input(
             "duplicate onboarding check stage",
-        ));
-    }
-    if checks
-        .iter()
-        .any(|check| check.status == Status::Acknowledged && !check.stage.manual())
-    {
-        return Err(crate::error::Error::invalid_input(
-            "acknowledgement is only valid for manual onboarding checks",
         ));
     }
     let mut observed = checks.into_iter().peekable();
@@ -178,8 +119,5 @@ fn ordered_checks(mut checks: Vec<Check>) -> crate::error::Result<Vec<Check>> {
         .collect())
 }
 const fn is_complete(check: &Check) -> bool {
-    matches!(
-        (check.stage.manual(), check.status),
-        (true, Status::Acknowledged) | (false, Status::Verified)
-    )
+    matches!(check.status, Status::Verified)
 }

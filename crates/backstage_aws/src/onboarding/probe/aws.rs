@@ -1,7 +1,5 @@
 use super::{Check, Stage};
-use super::{
-    action_required, aws_base, blocked, command_error, dns, invoke, parse_output, verified,
-};
+use super::{action_required, aws_base, blocked, command_error, invoke, parse_output, verified};
 use crate::{
     error::{Error, Result},
     settings::Settings,
@@ -80,18 +78,14 @@ pub(super) async fn identity(
         ))
     } else {
         match identity.principal {
-            Principal::Root => Err(action_required(
-                Stage::Account,
-                "The AWS root identity cannot be used; sign in with an assumed role.",
-            )),
             Principal::User => Err(action_required(
                 Stage::Account,
                 "An IAM long-lived user identity is not allowed; sign in with an assumed role.",
             )),
-            Principal::AssumedRole => Ok(verified(
+            Principal::Root | Principal::AssumedRole => Ok(verified(
                 Stage::Account,
                 format!(
-                    "Caller identity is an assumed role in configured account {}.",
+                    "Caller identity belongs to configured account {}.",
                     identity.account
                 ),
             )),
@@ -236,13 +230,6 @@ pub(super) async fn aws_json(
         ));
     }
     parse_output(&output, "AWS CLI", "read-only operation")
-}
-pub(super) async fn dns(
-    program: &Path,
-    profile: Option<&str>,
-    settings: &Settings,
-) -> Result<std::result::Result<Check, Check>> {
-    dns::delegation(program, profile, settings).await
 }
 
 pub(super) fn credential_or_access(

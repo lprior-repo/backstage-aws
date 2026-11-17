@@ -51,11 +51,6 @@ pub(crate) async fn doctor(ctx: &Ctx) -> Result<DoctorResult> {
             "credentials are for account {account}, but this project targets {expected}"
         )));
     }
-    if arn.ends_with(":root") {
-        return Err(Error::precondition_failed(
-            "root credentials are refused; use short-lived role credentials",
-        ));
-    }
     let repository = &ctx.settings.settings.github_repository;
     let administers = github::administers(&github::client()?, repository).await?;
     if administers == Some(false) {

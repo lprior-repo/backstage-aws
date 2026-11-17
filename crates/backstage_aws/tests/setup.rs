@@ -159,13 +159,13 @@ fn unknown_aws_failure_does_not_expose_raw_diagnostics() -> TestResult {
 }
 
 #[test]
-fn complete_evidence_is_ready_but_manual_checks_remain_attestations() -> TestResult {
+fn complete_evidence_is_ready_for_doctor() -> TestResult {
     // Given complete external evidence and a generated-project layout.
     let directory = tempfile::tempdir()?;
     let bin = directory.path().join("bin");
     std::fs::create_dir(&bin)?;
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    ["terraform", "dig", "docker", "git"]
+    ["terraform", "docker", "git"]
         .into_iter()
         .try_for_each(|tool| {
             std::os::unix::fs::symlink(fixtures.join("setup-tool"), bin.join(tool))
@@ -173,7 +173,7 @@ fn complete_evidence_is_ready_but_manual_checks_remain_attestations() -> TestRes
     ["infra/bootstrap", "infra/base", "infra/env"]
         .into_iter()
         .try_for_each(|part| std::fs::create_dir_all(directory.path().join(part)))?;
-    // When the owner explicitly attests both console-only checks.
+    // When setup runs against the complete evidence.
     let output = Command::new(BINARY)
         .env_clear()
         .env("PATH", &bin)
@@ -199,18 +199,11 @@ fn complete_evidence_is_ready_but_manual_checks_remain_attestations() -> TestRes
         .arg(directory.path())
         .arg("--terraform")
         .arg(bin.join("terraform"))
-        .args([
-            "setup",
-            "--confirm",
-            "organization-email",
-            "--confirm",
-            "identity-center-mfa",
-            "--aws-cli",
-        ])
+        .args(["setup", "--aws-cli"])
         .arg(fixtures.join("setup-aws"))
         .output()?;
     let document: Value = serde_json::from_slice(&output.stdout)?;
-    // Then readiness is only for doctor; manual gates are not API-verified.
+    // Then readiness only hands off to doctor; setup performs no mutation.
     assert_eq!(output.status.code(), Some(0), "{document}");
     assert_eq!(
         document.pointer("/result/status"),
@@ -220,16 +213,12 @@ fn complete_evidence_is_ready_but_manual_checks_remain_attestations() -> TestRes
         .pointer("/result/checks")
         .and_then(Value::as_array)
         .ok_or("missing checks")?;
-    assert_eq!(checks.len(), 13);
-    let manual = checks
-        .iter()
-        .filter(|check| check.get("status") == Some(&Value::from("acknowledged")))
-        .count();
-    assert_eq!(manual, 2);
-    assert!(checks.iter().all(|check| matches!(
-        check.get("status").and_then(Value::as_str),
-        Some("verified" | "acknowledged")
-    )));
+    assert_eq!(checks.len(), 7);
+    assert!(
+        checks
+            .iter()
+            .all(|check| check.get("status") == Some(&Value::from("verified")))
+    );
     Ok(())
 }
 

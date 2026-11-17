@@ -1,7 +1,6 @@
 #!/bin/sh
 case "$0" in
   */terraform) echo '{"terraform_version":"1.17.2","platform":"linux_amd64","provider_selections":{},"terraform_outdated":false}' ;;
-  */dig) printf '%s\n' 'ns-1.example.net.' 'ns-2.example.net.' ;;
   */docker) echo 'Docker fixture available' ;;
   */git) echo 'git version fixture' ;;
   *) exit 64 ;;

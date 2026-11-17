@@ -8,7 +8,7 @@
 
 | Command | Options | Approval | Result |
 |---|---|---:|---|
-| `setup` | `--aws-cli PATH`, `--profile NAME`, repeated `--confirm CHECK` | No | Read-only ordered discovery; one next action and resumable argv. Confirmations: `organization-email`, `identity-center-mfa`. Ready means run `doctor`, not deployed. |
+| `setup` | `--aws-cli PATH`, `--profile NAME` | No | Read-only ordered discovery; one next action and resumable argv. Ready means run `doctor`, not deployed. |
 | `init --output DIR` | required | No | Render project; destination must be new. Writes `environments/<environment>.env`. |
 | `check` | `--app`, `--runtime`, `--postgres-bin DIR` (requires `--runtime`), `--release-archive FILE` | No | Offline Terraform validation/tests; optionally build the app, rehearse native PostgreSQL/app behavior, or smoke-test a release archive. See below. |
 | `doctor` | — | No | Check Terraform, the selected container engine (Docker Buildx or Podman), Git, AWS identity/account, GitHub admin access. No changes. |
