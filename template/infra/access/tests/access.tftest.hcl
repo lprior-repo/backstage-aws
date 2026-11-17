@@ -83,7 +83,7 @@ run "optional_permissions_are_scoped_and_fit_aws_policy_limits" {
       length(aws_ssoadmin_customer_managed_policy_attachment.provisioner) == 10 &&
       length(aws_iam_policy.account_controls) == 1 &&
       alltrue([for policy in [
-        aws_iam_policy.workload_boundary, aws_iam_policy.load_balancing,
+        aws_iam_policy.load_balancing,
         aws_iam_policy.network, aws_iam_policy.ec2, aws_iam_policy.storage,
         aws_iam_policy.encryption, aws_iam_policy.rds, aws_iam_policy.data_services,
         aws_iam_policy.operations, aws_iam_policy.dns[0], aws_iam_policy.account_controls[0]

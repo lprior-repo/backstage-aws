@@ -120,23 +120,23 @@ resource "aws_iam_role_policy" "db_lifecycle_task_access" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
         Resource = [aws_secretsmanager_secret.db_lifecycle.arn]
       },
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:PutSecretValue"]
+        Effect   = "Allow"
+        Action   = ["secretsmanager:PutSecretValue"]
         Resource = [aws_secretsmanager_secret.db_lifecycle.arn]
       },
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
         Resource = [aws_secretsmanager_secret.app_db.arn]
       },
       {
-        Effect = "Allow"
-        Action = ["kms:Decrypt"]
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
         Resource = aws_kms_key.app.arn
         Condition = {
           StringEquals = { "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com" }
@@ -299,8 +299,8 @@ resource "aws_ecs_task_definition" "db_admin_clone" {
   memory                   = "512"
   # Clone uses the dedicated lifecycle login (CREATEDB) instead of the
   # RDS master, so CI can never pass master credentials to an environment.
-  execution_role_arn       = aws_iam_role.db_lifecycle_execution.arn
-  task_role_arn            = aws_iam_role.db_lifecycle_task.arn
+  execution_role_arn = aws_iam_role.db_lifecycle_execution.arn
+  task_role_arn      = aws_iam_role.db_lifecycle_task.arn
   container_definitions = jsonencode([{
     name       = "db-admin"
     image      = "public.ecr.aws/docker/library/postgres:16"

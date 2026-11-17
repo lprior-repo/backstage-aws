@@ -96,24 +96,12 @@
       }
     },
     {
-      "Sid": "PassPortalRoles",
+      "Sid": "PassProjectTaskRoles",
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": [
         ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-task")},
-        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")}
-      ],
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": "ecs-tasks.amazonaws.com"
-        }
-      }
-    },
-    {
-      "Sid": "PassLifecycleRoles",
-      "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": [
+        ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-portal-execution")},
         ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-lifecycle-task")},
         ${jsonencode("arn:${partition}:iam::${account_id}:role/${name}-db-lifecycle-execution")}
       ],

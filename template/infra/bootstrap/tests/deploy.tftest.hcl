@@ -1,7 +1,12 @@
 mock_provider "aws" {
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
   mock_data "aws_partition" { defaults = { partition = "aws" } }
+  mock_resource "aws_iam_policy" {
+    defaults = { arn = "arn:aws:iam::123456789012:policy/backstage-workload-boundary" }
+  }
 }
+
+mock_provider "time" {}
 
 variables {
   aws_account_id    = "123456789012"

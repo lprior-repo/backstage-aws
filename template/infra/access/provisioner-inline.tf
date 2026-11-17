@@ -7,6 +7,6 @@ resource "aws_ssoadmin_permission_set_inline_policy" "provisioner" {
     region       = var.aws_region
     account_id   = var.aws_account_id
     name         = var.name
-    boundary_arn = aws_iam_policy.workload_boundary.arn
+    boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:policy/${var.name}-workload-boundary"
   })))
 }

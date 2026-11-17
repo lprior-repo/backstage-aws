@@ -25,8 +25,8 @@ flowchart LR
 
 | Stack | Lifetime | Owns |
 |---|---|---|
-| `access` | Owner-managed account setup | Scoped IAM Identity Center provisioner and workload boundary |
-| `bootstrap` | Account | State/KMS, GitHub OIDC role, optional account baseline and budget |
+| `access` | Owner-managed account setup | Scoped IAM Identity Center provisioner permission set |
+| `bootstrap` | Account | State/KMS, GitHub OIDC role, workload boundary policy, optional account baseline and budget |
 | `base` | Shared | VPC, ALB/TLS/DNS, ECS, ECR, RDS, secrets, seed/dump storage and admin tasks |
 | `env` | Namespace | Target group, listener rule, log group, task definition and service |
 

@@ -9,3 +9,10 @@ resource "aws_iam_policy" "workload_boundary" {
     dns_suffix = data.aws_partition.current.dns_suffix
   })))
 }
+
+# IAM can reject a newly created policy as a permissions boundary for a short time.
+# Waiting here lets the deploy role attach it in the same apply without a manual retry.
+resource "time_sleep" "workload_boundary" {
+  create_duration = "30s"
+  depends_on      = [aws_iam_policy.workload_boundary]
+}

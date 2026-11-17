@@ -28,12 +28,19 @@ psql --no-psqlrc --no-password --set=ON_ERROR_STOP=1 \
   --set=app_role="$APP_ROLE" --set=lifecycle_role="$LIFECYCLE_ROLE" <<'SQL'
 SELECT format('CREATE ROLE %I LOGIN CREATEDB', :'lifecycle_role')
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'lifecycle_role') \gexec
--- Ensure no stale ADMIN OPTION from prior grants.
-ALTER ROLE :lifecycle_role NOINHERIT;
-REVOKE ADMIN OPTION FOR :app_role FROM :lifecycle_role;
+-- Lifecycle must inherit the app role: CREATE DATABASE ... TEMPLATE seed needs ownership
+-- of the template, and DROP DATABASE needs ownership of cloned databases; both are checked
+-- through inherited membership. PG16 copies the role's INHERIT setting into each new
+-- membership, so revoke and re-grant to replace any edge created while NOINHERIT.
+ALTER ROLE :lifecycle_role INHERIT;
+REVOKE :app_role FROM :lifecycle_role;
 GRANT :app_role TO :lifecycle_role;
--- Prevent future accidental privilege escalation via ALTER ROLE.
-ALTER ROLE :lifecycle_role NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+-- RDS admins are not superusers, and Postgres rejects ALTER ROLE naming SUPERUSER,
+-- REPLICATION or BYPASSRLS even when the value is unchanged. The CREATE above already
+-- yields those attributes off, so verify them read-only and fail closed instead.
+SELECT format('DO $$ BEGIN RAISE EXCEPTION %L; END $$', 'lifecycle role has elevated attributes')
+FROM pg_roles
+WHERE rolname = :'lifecycle_role' AND (rolsuper OR rolreplication OR rolbypassrls) \gexec
 SQL
 # Set the lifecycle login password (encrypted by psql before sending).
 printf '%s\n%s\n' "$LIFECYCLE_PASSWORD" "$LIFECYCLE_PASSWORD" |

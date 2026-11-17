@@ -45,25 +45,27 @@ resource "aws_iam_role" "github_deploy" {
   count                = var.github_repository != null ? 1 : 0
   name                 = "${var.name}-github-deploy"
   max_session_duration = 3600
-  permissions_boundary = "arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:policy/${var.name}-workload-boundary"
+  permissions_boundary = aws_iam_policy.workload_boundary.arn
   assume_role_policy = jsonencode(jsondecode(templatefile("${path.module}/policies/github-deploy-trust.json.tftpl", {
     github_oidc_provider_arn = local.github_provider_arn
     github_oidc_subject      = "repo:${var.github_repository}:${var.environment == "production" ? "ref:refs/heads/main" : "*"}"
   })))
+
+  depends_on = [time_sleep.workload_boundary]
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
   count = var.github_repository != null ? 1 : 0
   role  = aws_iam_role.github_deploy[0].id
   policy = jsonencode(jsondecode(templatefile("${path.module}/policies/github-deploy-permissions.json.tftpl", {
-    ecr_portal_repository_arn              = "arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${var.aws_account_id}:repository/${var.name}/portal"
-    ecs_service_arn                        = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:service/${var.name}-cluster/${var.name}-*"
-    ecs_task_definition_arn                = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.name}-*:*"
-    ecs_cluster_arn                        = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:cluster/${var.name}-cluster"
-    ecs_task_arn                           = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task/${var.name}-cluster/*"
-    task_role_arns                         = local.task_role_arns
-    elasticloadbalancing_target_group_arn  = "arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.aws_region}:${var.aws_account_id}:targetgroup/*"
-    project_name                           = var.name
+    ecr_portal_repository_arn             = "arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${var.aws_account_id}:repository/${var.name}/portal"
+    ecs_service_arn                       = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:service/${var.name}-cluster/${var.name}-*"
+    ecs_task_definition_arn               = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.name}-*:*"
+    ecs_cluster_arn                       = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:cluster/${var.name}-cluster"
+    ecs_task_arn                          = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task/${var.name}-cluster/*"
+    task_role_arns                        = local.task_role_arns
+    elasticloadbalancing_target_group_arn = "arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.aws_region}:${var.aws_account_id}:targetgroup/*"
+    project_name                          = var.name
     elasticloadbalancing_listener_arns = [
       "arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.aws_region}:${var.aws_account_id}:listener/app/${var.name}-alb/*",
       "arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.aws_region}:${var.aws_account_id}:listener-rule/app/${var.name}-alb/*"

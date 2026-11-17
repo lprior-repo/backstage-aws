@@ -45,6 +45,20 @@ run "base_security_and_outputs" {
     }
   }
   override_resource {
+    target          = aws_secretsmanager_secret.identity
+    override_during = plan
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:identity"
+    }
+  }
+  override_resource {
+    target          = aws_secretsmanager_secret.db_lifecycle
+    override_during = plan
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-lifecycle"
+    }
+  }
+  override_resource {
     target          = aws_kms_key.app
     override_during = plan
     values = {

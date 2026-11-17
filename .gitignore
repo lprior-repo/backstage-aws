@@ -16,3 +16,27 @@ backend.local.tf
 .backstage-aws/
 .env
 .env.*
+.envrc
+.dev.vars
+
+# Credentials and private keys: never commit, even by accident
+*.key
+*.p12
+*.pfx
+*.kubeconfig
+.netrc
+.npmrc
+.aws/
+id_rsa*
+id_ed25519*
+*credentials*.json
+*service-account*.json
+
+# Terraform workspaces and crash logs can contain state or plan data
+.terraform-workspace-*/
+crash.log
+crash.*.log
+# Terraform state, workspace state and lock info
+terraform.tfstate.d/
+.terraform.tfstate.lock.info
+*.tfstate.backup
